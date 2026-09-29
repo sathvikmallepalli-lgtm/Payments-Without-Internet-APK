@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive icon 108×108 dp; 12dp inset → 84×84 dp wordmark (large; edges may clip on circular/squircle masks). -->
-<inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:insetLeft="12dp"
-    android:insetTop="12dp"
-    android:insetRight="12dp"
-    android:insetBottom="12dp"
-    android:drawable="@drawable/ic_flowpay_wordmark" />
+<!-- TrioMav T mark inside the adaptive icon safe area. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="@color/white"
+        android:pathData="M28,30 L80,30 L80,42 L60,42 L60,79 L48,79 L48,42 L28,42 Z" />
+    <path
+        android:fillColor="@color/white"
+        android:pathData="M31,84 L77,84 L77,88 L31,88 Z" />
+</vector>

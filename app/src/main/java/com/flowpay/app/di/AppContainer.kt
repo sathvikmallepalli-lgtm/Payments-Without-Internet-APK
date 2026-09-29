@@ -55,9 +55,8 @@ class AppContainer(context: Context) {
     }
 
     /**
-     * Closes the SMS operation window when a payment is cancelled.
-     * Process-scoped so it outlives the overlay service the user cancelled
-     * from.
+     * Closes the SMS operation window when a call never started.
+     * Post-dial uncertainty keeps the window open for bank evidence.
      */
     val paymentWindowObserver: PaymentWindowObserver by lazy {
         PaymentWindowObserver(
@@ -94,12 +93,14 @@ private class LazyTransactionStore(private val appContext: Context) : PaymentTra
         transactionId: String,
         status: String,
         parsed: SimpleTransaction,
-        verifiedAt: Long
+        verifiedAt: Long,
+        expectedStatus: String
     ): Int = repo().confirmTransaction(
         transactionId = transactionId,
         status = status,
         parsed = parsed,
-        verifiedAt = verifiedAt
+        verifiedAt = verifiedAt,
+        expectedStatus = expectedStatus
     )
 
     override suspend fun deleteStalePending(now: Long): Int = repo().deleteStalePending(now)

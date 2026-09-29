@@ -43,20 +43,14 @@ the 123Pay IVR for you and gives you a smartphone UI to start from; the
 actual authorization happens between you, your telecom operator, your bank,
 and NPCI, exactly as if you had dialed the code yourself.
 
-### Why did a payment I started not show up at all?
+### What if my bank sends no SMS after I entered my PIN?
 
-Because **no confirmation SMS arrived from your bank**. Flowpay records a
-payment only when the bank confirms it — it deliberately never guesses, and
-won't call a payment successful just because the call connected or lasted a
-while. If the confirmation never comes, the attempt is discarded rather than
-left behind as an outcome you can't act on, so check your bank statement or
-SMS inbox to see whether the money actually moved. Confirmations that arrive
-a little late are still picked up. This is the honest-by-design behavior; see
+Flowpay keeps the attempt in Transaction History as `UNVERIFIED` even if you
+close the payment screen. Open **Check payments** in History, then compare
+the payee, amount and time with your bank app or statement before retrying.
+The payment may have succeeded without an SMS. A late SMS can add evidence,
+but only your bank can settle an otherwise unknown outcome; see
 [ARCHITECTURE.md](ARCHITECTURE.md).
-
-Transactions marked `UNVERIFIED` in your history are from an older version,
-which recorded unconfirmed attempts instead of discarding them; they mean
-the same thing — Flowpay doesn't know whether that payment went through.
 
 ### What are the carrier / USSD limitations?
 

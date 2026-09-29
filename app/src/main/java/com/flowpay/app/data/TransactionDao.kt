@@ -53,7 +53,7 @@ interface TransactionDao {
      * Search transactions by recipient name or phone number
      */
     @Query(
-        "SELECT * FROM transactions WHERE recipientName LIKE :query OR phoneNumber LIKE :query ORDER BY timestamp DESC"
+        "SELECT * FROM transactions WHERE recipientName LIKE :query OR phoneNumber LIKE :query ORDER BY timestamp DESC",
     )
     fun searchTransactions(query: String): Flow<List<Transaction>>
 
@@ -62,6 +62,13 @@ interface TransactionDao {
      */
     @Query("SELECT * FROM transactions WHERE transactionId = :transactionId")
     suspend fun getTransactionById(transactionId: String): Transaction?
+
+    /** Candidate rows for the duplicate-attempt guard; amount comparison stays decimal-precise in Kotlin. */
+    @Query(
+        "SELECT * FROM transactions WHERE upiId = :upiId COLLATE NOCASE " +
+            "AND status IN ('PENDING', 'UNVERIFIED', 'NEEDS_REVIEW')",
+    )
+    suspend fun getUnresolvedForUpiId(upiId: String): List<Transaction>
 
     /**
      * Insert a new transaction
@@ -122,7 +129,7 @@ interface TransactionDao {
      * Returns the number of rows changed (0 if the row was not in the expected status).
      */
     @Query(
-        "UPDATE transactions SET status = :newStatus WHERE transactionId = :transactionId AND status = :expectedStatus"
+        "UPDATE transactions SET status = :newStatus WHERE transactionId = :transactionId AND status = :expectedStatus",
     )
     suspend fun transitionStatus(transactionId: String, expectedStatus: String, newStatus: String): Int
 
@@ -133,9 +140,9 @@ interface TransactionDao {
      * none (COALESCE), and amount is filled only when the row started without
      * one (the QR flow can begin before the user has entered an amount).
      *
-     * [expectedStatus] guards which rows a confirmation may land on — callers
-     * pass PENDING, so an SMS arriving after the payment was cancelled can
-     * never rewrite that cancelled row into a success.
+     * [expectedStatus] guards which rows a confirmation may land on. An
+     * UNVERIFIED attempt may receive late SMS evidence but is never promoted
+     * directly to SUCCESS merely because its amount matched.
      */
     @Query(
         "UPDATE transactions SET status = :status, bankRef = :bankRef, bankName = :bankName, " +
@@ -143,7 +150,7 @@ interface TransactionDao {
             "recipientName = COALESCE(:recipientName, recipientName), " +
             "amount = CASE WHEN amount = '' THEN :amount ELSE amount END, " +
             "verifiedAt = :verifiedAt " +
-            "WHERE transactionId = :transactionId AND status = :expectedStatus"
+            "WHERE transactionId = :transactionId AND status = :expectedStatus",
     )
     @Suppress("LongParameterList") // Room @Query binds flat parameters; the
     // domain seam (PaymentTransactionStore) takes a SimpleTransaction instead.
@@ -157,16 +164,16 @@ interface TransactionDao {
         recipientName: String?,
         amount: String,
         verifiedAt: Long,
-        expectedStatus: String
+        expectedStatus: String,
     ): Int
 
     /**
-     * PENDING rows past their verification deadline are discarded: a payment
-     * with no bank confirmation is not a payment we can report on, so it
-     * leaves no trace rather than lingering as an outcome the user can't act
-     * on. Returns the number of rows removed.
+     * An absent SMS is inconclusive. Preserve the attempt for a bank check.
      */
-    @Query("DELETE FROM transactions WHERE status = 'PENDING' AND deadlineAt IS NOT NULL AND deadlineAt < :now")
+    @Query(
+        "UPDATE transactions SET status = 'UNVERIFIED' " +
+            "WHERE status = 'PENDING' AND deadlineAt IS NOT NULL AND deadlineAt < :now",
+    )
     suspend fun deleteStalePending(now: Long): Int
 
     /**

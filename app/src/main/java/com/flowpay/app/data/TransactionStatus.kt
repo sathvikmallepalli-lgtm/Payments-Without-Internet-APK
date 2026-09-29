@@ -9,12 +9,12 @@ package com.flowpay.app.data
  * PENDING      — payment initiated, dial in progress or awaiting bank SMS
  * SUCCESS      — bank SMS confirmed the debit
  * FAILED       — bank SMS reported a failure/decline
- * CANCELLED    — call ended before the IVR flow could complete, or dial failed
- * UNVERIFIED   — call completed but no bank SMS arrived within the deadline;
+ * CANCELLED    — dial failed or the user left before dialing
+ * UNVERIFIED   — payment may have been submitted but no bank SMS has arrived;
  *                the money may or may not have moved — the user must check
  *                with their bank
- * NEEDS_REVIEW — a bank SMS confirmed *something* during this payment, but
- *                its amount didn't match what was sent — the user must verify
+ * NEEDS_REVIEW — bank SMS evidence cannot be safely linked to this attempt;
+ *                the user must verify
  *                against their bank statement before trusting the outcome
  */
 object TransactionStatus {
@@ -32,4 +32,5 @@ object TransactionSource {
     const val NOTIFICATION = "NOTIFICATION"
     const val MANUAL = "MANUAL"
     const val QR = "QR"
+    const val UPI_HANDOFF = "UPI_HANDOFF"
 }

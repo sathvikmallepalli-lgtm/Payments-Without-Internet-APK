@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.flowpay.app.R
 import com.flowpay.app.data.Transaction
+import com.flowpay.app.data.TransactionStatus
 import com.flowpay.app.ui.components.TransactionDetailDialog
 import com.flowpay.app.ui.theme.BlueAccentTheme
 import com.flowpay.app.ui.theme.FlowpayDarkGray
@@ -106,6 +107,7 @@ fun TransactionHistoryScreen(
     // State
     var searchQuery by remember { mutableStateOf("") }
     var showSearchBar by remember { mutableStateOf(false) }
+    var showVerificationOnly by remember { mutableStateOf(false) }
     var selectedTransaction by remember { mutableStateOf<Transaction?>(null) }
 
     // Collect data
@@ -113,18 +115,25 @@ fun TransactionHistoryScreen(
     val isLoading by transactionViewModel.isLoading.collectAsState()
     val error by transactionViewModel.error.collectAsState()
 
-    // Filter by search only
-    val filteredTransactions = remember(allTransactions, searchQuery) {
-        if (searchQuery.isEmpty()) {
-            allTransactions
-        } else {
-            allTransactions.filter { transaction ->
-                transaction.recipientName?.contains(searchQuery, ignoreCase = true) == true ||
-                    transaction.phoneNumber?.contains(searchQuery, ignoreCase = true) == true ||
-                    transaction.bankName.contains(searchQuery, ignoreCase = true) ||
-                    transaction.amount.contains(searchQuery, ignoreCase = true)
+    val verificationStatuses = setOf(
+        TransactionStatus.PENDING,
+        TransactionStatus.UNVERIFIED,
+        TransactionStatus.NEEDS_REVIEW
+    )
+    val verificationCount = allTransactions.count { it.status in verificationStatuses }
+    val filteredTransactions = remember(allTransactions, searchQuery, showVerificationOnly) {
+        allTransactions
+            .filter { !showVerificationOnly || it.status in verificationStatuses }
+            .filter { transaction ->
+                if (searchQuery.isEmpty()) {
+                    true
+                } else {
+                    transaction.recipientName?.contains(searchQuery, ignoreCase = true) == true ||
+                        transaction.phoneNumber?.contains(searchQuery, ignoreCase = true) == true ||
+                        transaction.bankName.contains(searchQuery, ignoreCase = true) ||
+                        transaction.amount.contains(searchQuery, ignoreCase = true)
+                }
             }
-        }
     }
 
     // Group by date
@@ -306,6 +315,31 @@ fun TransactionHistoryScreen(
                         ),
                         shape = RoundedCornerShape(16.dp),
                         singleLine = true
+                    )
+                }
+
+                if (verificationCount > 0 || showVerificationOnly) {
+                    FilterChip(
+                        selected = showVerificationOnly,
+                        onClick = { showVerificationOnly = !showVerificationOnly },
+                        label = {
+                            Text(
+                                if (showVerificationOnly) {
+                                    stringResource(R.string.verification_show_all)
+                                } else {
+                                    stringResource(R.string.verification_filter, verificationCount)
+                                }
+                            )
+                        },
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                }
+                if (showVerificationOnly) {
+                    Text(
+                        text = stringResource(R.string.verification_instructions),
+                        color = FlowpayTextLightGray,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                     )
                 }
 

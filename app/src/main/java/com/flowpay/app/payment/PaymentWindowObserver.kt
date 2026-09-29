@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Closes the SMS operation window when a payment is cancelled.
+ * Closes the SMS operation window when the payment call never started.
  *
  * The window is [TransactionDetector]'s SharedPreferences-backed record that
  * a payment is in flight; while it is open, an arriving bank SMS may be
@@ -22,12 +22,10 @@ import kotlinx.coroutines.launch
  * through another app, say) was adopted onto the cancelled row and flipped
  * it to SUCCESS.
  *
- * Every cancel route — the overlay's terminate button, the never-connected
- * watchdog, a call that ended before the IVR flow could finish, a failed
- * dial — funnels into [PaymentSessionManager.finishSession] and emits
- * [PaymentState.Cancelled], so observing that one state closes them all;
- * [PaymentSessionManager] keeps its deliberate independence from
- * [TransactionDetector].
+ * A dial failure or cancellation before dial emits [PaymentState.Cancelled].
+ * Closing a flow after the dialer launched emits VerificationPending instead;
+ * its window remains open because the bank may still complete a transfer.
+ * [PaymentSessionManager] stays independent from [TransactionDetector].
  *
  * Deliberately *not* triggered by [PaymentState.Timeout]: the window
  * outlives the verification deadline by 30 seconds on purpose, so a
@@ -56,13 +54,13 @@ class PaymentWindowObserver(
 
         private fun defaultDisarm(context: Context) {
             TransactionDetector.getInstance(context).stopOperation()
-            Log.d(TAG, "Payment cancelled - SMS operation window closed")
+            Log.d(TAG, "Pre-call payment cancelled - SMS operation window closed")
         }
     }
 }
 
 /**
- * Pure mapping: only a cancelled session must also close the SMS window.
+ * Pure mapping: only a pre-call cancelled session closes the SMS window.
  * Success and failure consume the window in the ingestion path, and a
  * timeout leaves it to expire on its own (see the class KDoc).
  */

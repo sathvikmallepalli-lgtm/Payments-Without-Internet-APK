@@ -12,5 +12,7 @@ data class UPIData(
     val payeeName: String,
     var amount: String,
     val transactionNote: String,
-    val currency: String
+    val currency: String,
+    /** Original validated QR payload, retained for merchant references and signatures. */
+    val originalQrUri: String? = null
 ) : Parcelable

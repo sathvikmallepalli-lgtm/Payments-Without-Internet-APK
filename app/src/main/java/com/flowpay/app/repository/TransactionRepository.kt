@@ -4,10 +4,11 @@
 package com.flowpay.app.repository
 
 import android.content.Context
+import androidx.room.withTransaction
 import com.flowpay.app.data.AppDatabase
 import com.flowpay.app.data.Transaction
 import com.flowpay.app.data.TransactionDao
-import com.flowpay.app.data.TransactionStatus
+import com.flowpay.app.payment.UnresolvedPaymentGuard
 import com.flowpay.app.payment.sms.SimpleTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -19,7 +20,8 @@ import kotlinx.coroutines.flow.map
 class TransactionRepository private constructor(context: Context) :
     com.flowpay.app.payment.PaymentTransactionStore {
 
-    private val transactionDao: TransactionDao = AppDatabase.getDatabase(context).transactionDao()
+    private val database: AppDatabase = AppDatabase.getDatabase(context)
+    private val transactionDao: TransactionDao = database.transactionDao()
 
     companion object {
         @Volatile
@@ -102,6 +104,30 @@ class TransactionRepository private constructor(context: Context) :
     }
 
     /**
+     * A check and insert in one database transaction closes the window in
+     * which two fast taps could both launch a payment before the UI Flow updates.
+     * Explicit retry is permitted only after the user acknowledges the warning.
+     */
+    suspend fun insertUpiHandoffIfSafe(transaction: Transaction, retryAcknowledged: Boolean): Boolean =
+        database.withTransaction {
+            val previous = transactionDao.getUnresolvedForUpiId(transaction.upiId.orEmpty())
+            val duplicate = previous.any {
+                UnresolvedPaymentGuard.matches(it, transaction.upiId.orEmpty(), transaction.amount)
+            }
+            if (duplicate && !retryAcknowledged) {
+                false
+            } else {
+                transactionDao.insertTransaction(transaction)
+                true
+            }
+        }
+
+    suspend fun hasUnresolvedUpiPayment(upiId: String, amount: String): Boolean =
+        transactionDao.getUnresolvedForUpiId(upiId).any {
+            UnresolvedPaymentGuard.matches(it, upiId, amount)
+        }
+
+    /**
      * Update a transaction
      */
     suspend fun updateTransaction(transaction: Transaction) {
@@ -159,7 +185,7 @@ class TransactionRepository private constructor(context: Context) :
     override suspend fun transitionStatus(
         transactionId: String,
         expectedStatus: String,
-        newStatus: String
+        newStatus: String,
     ): Int {
         return transactionDao.transitionStatus(transactionId, expectedStatus, newStatus)
     }
@@ -168,7 +194,8 @@ class TransactionRepository private constructor(context: Context) :
         transactionId: String,
         status: String,
         parsed: SimpleTransaction,
-        verifiedAt: Long
+        verifiedAt: Long,
+        expectedStatus: String,
     ): Int {
         return transactionDao.confirmTransaction(
             transactionId = transactionId,
@@ -180,7 +207,7 @@ class TransactionRepository private constructor(context: Context) :
             recipientName = parsed.recipientName,
             amount = parsed.amount,
             verifiedAt = verifiedAt,
-            expectedStatus = TransactionStatus.PENDING
+            expectedStatus = expectedStatus,
         )
     }
 

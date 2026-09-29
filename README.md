@@ -1,4 +1,8 @@
-# Flowpay - Payments Without Internet
+# TrioMav Pay / FlowPay
+
+**TrioMav Pay is the new Android app layer; FlowPay supplies its existing phone-payment architecture.** The current build supports scan-and-review, UPI app handoff on validated internet, eligible phone-payment fallback, receive QR, and local payment activity. It does not yet provide native UPI bank linking or authoritative online payment status. See [current build status](docs/TRIOMAV_PAY_BUILD_STATUS.md) and [product blueprint](docs/TRIOMAV_PAY_PRODUCT_BLUEPRINT.md).
+
+The FlowPay material below documents the underlying phone-payment implementation. Carrier and bank support must be checked on real devices before making availability claims.
 
 *An Android app that brings UPI payments to users with no internet, using `*99#` USSD and UPI 123Pay (IVR) rails.*
 
@@ -62,7 +66,9 @@ Telco-era rails don't give you much to work with. Here's what Flowpay had to sol
 
 **123Pay's IVR was built for feature phones.** It expects a user holding a phone to their ear, so Flowpay wraps the dialer hand-off with an on-screen guide to keep the experience coherent on a smartphone.
 
-**The rails don't expose a clean transaction lifecycle.** Neither flow hands the app a reliable success/failure callback, so Flowpay infers the outcome from the bank's confirmation SMS rather than from call state alone.
+**The rails don't expose a clean transaction lifecycle.** Neither flow hands the app a reliable success/failure callback, so Flowpay uses bank SMS evidence rather than call state alone. If the bank sends no SMS, the attempt remains visible as **Unverified** in Transaction History. Check your bank app or statement before retrying; a closed dialer screen does not undo a submitted payment.
+
+TrioMav Tech's phased product plan, including the route to authoritative bank status checks, is in [the offline roadmap](docs/TRIOMAV_OFFLINE_ROADMAP.md).
 
 
 ## Reading the code
@@ -75,7 +81,8 @@ app/src/main/java/com/flowpay/app/
 ├── TestConfigurationActivity.kt # post-setup connectivity test
 ├── payment/                     # ← the money path
 │   ├── PaymentSessionManager.kt # payment lifecycle; the only writer of PaymentState
-│   ├── PaymentWindowObserver.kt # closes the SMS window when a payment is cancelled
+│   ├── PaymentWindowObserver.kt # closes the SMS window only for pre-call cancellation
+│   ├── PaymentVerificationPolicy.kt # maps late SMS to review, never automatic success
 │   ├── Upi123CallStringBuilder.kt # builds + validates the 123Pay DTMF string
 │   ├── InvalidReasonMessages.kt # maps a rejection Reason to user-facing copy
 │   └── sms/SmsTransactionParser.kt # bank-SMS parsing (pure, Context-free)

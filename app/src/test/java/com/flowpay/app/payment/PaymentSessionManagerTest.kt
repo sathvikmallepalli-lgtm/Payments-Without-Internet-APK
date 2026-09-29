@@ -11,11 +11,13 @@ import com.flowpay.app.states.PaymentState
 import com.flowpay.app.telephony.CallSessionEvent
 import com.flowpay.app.telephony.CallStateSource
 import com.flowpay.app.telephony.DeviceCallState
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +29,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -89,11 +92,12 @@ class PaymentSessionManagerTest {
             transactionId: String,
             status: String,
             parsed: SimpleTransaction,
-            verifiedAt: Long
+            verifiedAt: Long,
+            expectedStatus: String
         ): Int {
             // Mirrors the DAO's status guard: a confirmation only lands on a
             // row still awaiting one, never on a cancelled or settled row.
-            val row = rows[transactionId]?.takeIf { it.status == TransactionStatus.PENDING }
+            val row = rows[transactionId]?.takeIf { it.status == expectedStatus }
                 ?: return 0
             rows[transactionId] = row.copy(
                 status = status,
@@ -115,7 +119,7 @@ class PaymentSessionManagerTest {
                 row.status == TransactionStatus.PENDING &&
                     row.deadlineAt != null && row.deadlineAt < now
             }.keys
-            stale.forEach { rows.remove(it) }
+            stale.forEach { id -> rows[id] = rows[id]!!.copy(status = TransactionStatus.UNVERIFIED) }
             return stale.size
         }
 
@@ -171,6 +175,29 @@ class PaymentSessionManagerTest {
         assertEquals(1, source.acquireCount)
     }
 
+    @Test
+    fun `dial gate waits until the attempt row is persisted`() = runTest {
+        val persisted = CompletableDeferred<Unit>()
+        val base = FakeStore()
+        val store = object : PaymentTransactionStore by base {
+            override suspend fun insertPending(transaction: Transaction) {
+                persisted.await()
+                base.insertPending(transaction)
+            }
+        }
+        val manager = PaymentSessionManager(store, FakeCallStateSource(), backgroundScope)
+        val id = manager.begin("9876543210", "500")
+        val ready = async { manager.awaitPendingInsert(id) }
+        runCurrent()
+        assertFalse(ready.isCompleted)
+        assertNull(base.rows[id])
+
+        persisted.complete(Unit)
+        runCurrent()
+        assertTrue(ready.await())
+        assertEquals(TransactionStatus.PENDING, base.rows[id]!!.status)
+    }
+
     // A new payment supersedes one still in flight rather than being refused.
     // Refusing stranded the user: a session the bank never confirmed stayed in
     // progress for its whole deadline and blocked every attempt to pay,
@@ -190,9 +217,7 @@ class PaymentSessionManagerTest {
         assertTrue(manager.paymentState.value is PaymentState.Initiating)
         assertEquals("9123456780", store.rows[second]!!.phoneNumber)
         assertEquals("200", store.rows[second]!!.amount)
-        // The superseded attempt was never confirmed, so under the
-        // "no confirmation, no record" rule it leaves no trace.
-        assertNull("superseded PENDING row must be discarded", store.rows[first])
+        assertEquals(TransactionStatus.UNVERIFIED, store.rows[first]!!.status)
     }
 
     // Superseding must never erase a row a confirmation already landed on —
@@ -248,7 +273,7 @@ class PaymentSessionManagerTest {
     }
 
     @Test
-    fun `short call without SMS is CANCELLED - never SUCCESS`() = runTest {
+    fun `short call without SMS remains visible as UNVERIFIED`() = runTest {
         val (manager, store, source) = newManager()
         val txnId = manager.begin("9876543210", "100")!!
         runCurrent()
@@ -258,8 +283,8 @@ class PaymentSessionManagerTest {
         source.callEnded(durationMs = 2_000)
         runCurrent()
 
-        assertTrue(manager.paymentState.value is PaymentState.Cancelled)
-        assertEquals(TransactionStatus.CANCELLED, store.rows[txnId]!!.status)
+        assertTrue(manager.paymentState.value is PaymentState.VerificationPending)
+        assertEquals(TransactionStatus.UNVERIFIED, store.rows[txnId]!!.status)
     }
 
     @Test
@@ -286,11 +311,9 @@ class PaymentSessionManagerTest {
         assertEquals(TransactionStatus.SUCCESS, store.rows[txnId]!!.status)
     }
 
-    // No confirming SMS means there is no payment to report: the row is
-    // discarded rather than left behind as an outcome the user can't act on.
-    // The Timeout state is still emitted so collectors wind themselves down.
+    // No SMS does not imply no debit (e.g. the Canara QR case).
     @Test
-    fun `no SMS before deadline discards the row and emits Timeout`() = runTest {
+    fun `no SMS before deadline keeps an UNVERIFIED row and emits Timeout`() = runTest {
         val (manager, store, source) = newManager()
         val txnId = manager.begin("9876543210", "100")!!
         runCurrent()
@@ -303,7 +326,7 @@ class PaymentSessionManagerTest {
         runCurrent()
 
         assertTrue(manager.paymentState.value is PaymentState.Timeout)
-        assertNull("An unconfirmed payment must leave no row behind", store.rows[txnId])
+        assertEquals(TransactionStatus.UNVERIFIED, store.rows[txnId]!!.status)
     }
 
     @Test
@@ -556,7 +579,7 @@ class PaymentSessionManagerTest {
     // -------------------------------------------------------------------
 
     @Test
-    fun `user cancellation from the overlay ends the session as CANCELLED`() = runTest {
+    fun `user cancellation after the call starts needs bank verification`() = runTest {
         val (manager, store, source) = newManager()
         val txnId = manager.begin("9876543210", "100")!!
         runCurrent()
@@ -566,9 +589,46 @@ class PaymentSessionManagerTest {
         manager.onUserCancelled()
         runCurrent()
 
-        assertTrue(manager.paymentState.value is PaymentState.Cancelled)
-        assertEquals(TransactionStatus.CANCELLED, store.rows[txnId]!!.status)
+        assertTrue(manager.paymentState.value is PaymentState.VerificationPending)
+        assertEquals(TransactionStatus.UNVERIFIED, store.rows[txnId]!!.status)
         assertEquals("coordinator must be released on terminal state", 1, source.releaseCount)
+    }
+
+    @Test
+    fun `QR exit after dial remains visible without a bank SMS`() = runTest {
+        val (manager, store, _) = newManager()
+        val id = manager.begin("", "", upiId = "merchant@upi", source = TransactionSource.QR)
+        runCurrent()
+
+        // Telephony OFFHOOK may not be observable on every device. The QR
+        // screen knows it launched the dialer, which is enough for uncertainty.
+        manager.onUserCancelled(paymentMayHaveBeenSubmitted = true)
+        runCurrent()
+
+        assertTrue(manager.paymentState.value is PaymentState.VerificationPending)
+        assertEquals(TransactionStatus.UNVERIFIED, store.rows[id]!!.status)
+        assertEquals("merchant@upi", store.rows[id]!!.upiId)
+        advanceTimeBy(PaymentSessionManager.DEFAULT_VERIFICATION_DEADLINE_MS + 1_000)
+        runCurrent()
+        assertEquals(TransactionStatus.UNVERIFIED, store.rows[id]!!.status)
+    }
+
+    @Test
+    fun `bank debit SMS after QR exit is evidence for review, not success`() = runTest {
+        val (manager, store, _) = newManager()
+        val id = manager.begin("", "", upiId = "merchant@upi", source = TransactionSource.QR)
+        runCurrent()
+        manager.onUserCancelled(paymentMayHaveBeenSubmitted = true)
+
+        val claim = manager.onSmsEvidence(bankSms(amount = "500"))!!
+        runCurrent()
+
+        assertEquals(id, claim.transactionId)
+        assertEquals(TransactionStatus.NEEDS_REVIEW, claim.status)
+        assertEquals(1, claim.persisted.await())
+        assertEquals(TransactionStatus.NEEDS_REVIEW, store.rows[id]!!.status)
+        assertEquals("HDFC123456", store.rows[id]!!.bankRef)
+        assertTrue(manager.paymentState.value is PaymentState.NeedsReview)
     }
 
     @Test
@@ -598,13 +658,13 @@ class PaymentSessionManagerTest {
         manager.onUserCancelled()
         runCurrent()
 
-        assertTrue(manager.paymentState.value is PaymentState.Cancelled)
-        assertEquals(TransactionStatus.CANCELLED, store.rows[txnId]!!.status)
+        assertTrue(manager.paymentState.value is PaymentState.VerificationPending)
+        assertEquals(TransactionStatus.UNVERIFIED, store.rows[txnId]!!.status)
         assertEquals("second call must not release the coordinator again", 1, source.releaseCount)
     }
 
     @Test
-    fun `call never starting during Initiating ends the session as CANCELLED`() = runTest {
+    fun `missing OFFHOOK after dial keeps the attempt for verification`() = runTest {
         val (manager, store, source) = newManager()
         val txnId = manager.begin("9876543210", "100")!!
         runCurrent()
@@ -617,8 +677,8 @@ class PaymentSessionManagerTest {
         manager.onCallNeverStarted()
         runCurrent()
 
-        assertTrue(manager.paymentState.value is PaymentState.Cancelled)
-        assertEquals(TransactionStatus.CANCELLED, store.rows[txnId]!!.status)
+        assertTrue(manager.paymentState.value is PaymentState.VerificationPending)
+        assertEquals(TransactionStatus.UNVERIFIED, store.rows[txnId]!!.status)
         assertEquals("coordinator must be released on terminal state", 1, source.releaseCount)
     }
 
@@ -658,7 +718,7 @@ class PaymentSessionManagerTest {
     }
 
     @Test
-    fun `stale PENDING rows are discarded on next begin`() = runTest {
+    fun `stale PENDING rows remain visible on next begin`() = runTest {
         val store = FakeStore()
         // A leftover PENDING row from a killed process, deadline long past.
         store.rows["stale"] = Transaction(
@@ -676,7 +736,7 @@ class PaymentSessionManagerTest {
         manager.begin("9876543210", "100")
         runCurrent()
 
-        assertNull("Stale unconfirmed rows must be removed", store.rows["stale"])
+        assertEquals(TransactionStatus.UNVERIFIED, store.rows["stale"]!!.status)
     }
 
     // A cancelled payment must stay cancelled. The user may well re-pay the
@@ -686,8 +746,6 @@ class PaymentSessionManagerTest {
     fun `a confirming SMS cannot resurrect a cancelled row`() = runTest {
         val (manager, store, source) = newManager()
         val txnId = manager.begin("9876543210", "500")!!
-        runCurrent()
-        source.callStarted(at = testScheduler.currentTime)
         runCurrent()
         manager.onUserCancelled()
         runCurrent()

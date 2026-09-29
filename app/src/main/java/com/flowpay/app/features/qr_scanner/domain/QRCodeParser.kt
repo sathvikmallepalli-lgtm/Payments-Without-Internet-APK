@@ -31,6 +31,7 @@ object QRCodeParser {
 
     // Generic input ceiling for a QR-initiated payment.
     private const val MAX_QR_AMOUNT = 100_000.0
+    private const val MAX_QR_URI_LENGTH = 4096
 
     /**
      * Why a scanned code was rejected.
@@ -47,6 +48,7 @@ object QRCodeParser {
         NO_PAYEE_ADDRESS,
         INVALID_PAYEE_ADDRESS,
         INVALID_AMOUNT,
+        INVALID_CURRENCY,
     }
 
     sealed class ParseResult {
@@ -56,9 +58,9 @@ object QRCodeParser {
 
     fun parse(qrCode: String): ParseResult {
         val raw = qrCode.trim()
-        if (raw.isEmpty()) return ParseResult.Invalid(Reason.EMPTY)
-
         return when {
+            raw.isEmpty() -> ParseResult.Invalid(Reason.EMPTY)
+            raw.length > MAX_QR_URI_LENGTH -> ParseResult.Invalid(Reason.MALFORMED)
             raw.startsWith("upi://", ignoreCase = true) -> parseUpiUri(raw)
             VPA_REGEX.matches(raw) -> ParseResult.Valid(
                 UPIData(vpa = raw, payeeName = "", amount = "", transactionNote = "", currency = "INR")
@@ -71,6 +73,15 @@ object QRCodeParser {
         val uri = try {
             Uri.parse(raw)
         } catch (e: Exception) {
+            return ParseResult.Invalid(Reason.MALFORMED)
+        }
+
+        if (!uri.scheme.equals("upi", ignoreCase = true) ||
+            !uri.authority.equals("pay", ignoreCase = true)
+        ) {
+            return ParseResult.Invalid(Reason.NOT_A_UPI_QR)
+        }
+        if (hasDuplicatePaymentFields(uri)) {
             return ParseResult.Invalid(Reason.MALFORMED)
         }
 
@@ -97,6 +108,11 @@ object QRCodeParser {
             }
         }
 
+        val currency = uri.getQueryParameter("cu")?.trim().orEmpty()
+        if (isUnsupportedCurrency(currency)) {
+            return ParseResult.Invalid(Reason.INVALID_CURRENCY)
+        }
+
         val payeeName = uri.getQueryParameter("pn")
             ?.trim()
             ?.replace(Regex("[\\p{Cntrl}]"), "")
@@ -110,12 +126,30 @@ object QRCodeParser {
                 payeeName = payeeName,
                 amount = amountParam,
                 transactionNote = note,
-                currency = "INR"
+                currency = "INR",
+                originalQrUri = raw
             )
         )
     }
 
+    private fun hasDuplicatePaymentFields(uri: Uri): Boolean =
+        listOf("pa", "pn", "am", "cu").any { uri.getQueryParameters(it).size > 1 }
+
+    private fun isUnsupportedCurrency(currency: String): Boolean =
+        currency.isNotEmpty() && !currency.equals("INR", ignoreCase = true)
+
     fun isValidUPIQRCode(qrCode: String): Boolean = parse(qrCode) is ParseResult.Valid
+
+    /** Text fields for an account address must not accept a full payment request. */
+    fun isBareVpa(value: String): Boolean = VPA_REGEX.matches(value.trim())
+
+    /** Order fields cannot survive the USSD route, so the QR needs an online UPI handoff. */
+    fun requiresOnlineRoute(data: UPIData): Boolean {
+        val original = data.originalQrUri ?: return false
+        val uri = Uri.parse(original)
+        return listOf("tr", "tid", "tn", "url", "sign", "mid", "msid", "mtid")
+            .any { !uri.getQueryParameter(it).isNullOrBlank() }
+    }
 
     /**
      * Legacy adapter for call sites built around "empty VPA means invalid".
@@ -147,4 +181,5 @@ fun QRCodeParser.Reason.messageFor(context: Context): String = when (this) {
     QRCodeParser.Reason.NO_PAYEE_ADDRESS -> context.getString(R.string.qr_reason_no_payee)
     QRCodeParser.Reason.INVALID_PAYEE_ADDRESS -> context.getString(R.string.qr_reason_invalid_payee)
     QRCodeParser.Reason.INVALID_AMOUNT -> context.getString(R.string.qr_reason_invalid_amount)
+    QRCodeParser.Reason.INVALID_CURRENCY -> context.getString(R.string.qr_reason_invalid_currency)
 }

@@ -1,8 +1,101 @@
 <resources>
-    <string name="app_name">Flowpay</string>
+    <string name="app_name">TrioMav Pay</string>
+
+    <!-- TrioMav Pay: the consumer app above FlowPay's phone payment flows. -->
+    <string name="triomav_home_title">Pay with confidence</string>
+    <string name="triomav_home_subtitle">One clear way to pay, with help when the connection changes.</string>
+    <string name="triomav_scan_pay">Scan &amp; Pay</string>
+    <string name="triomav_scan_qr_title">Scan a UPI QR</string>
+    <string name="triomav_scan_hint">You will review the recipient and amount before paying.</string>
+    <string name="triomav_pay_someone">Pay a UPI ID</string>
+    <string name="triomav_resume_payment">Resume unfinished payment</string>
+    <string name="triomav_receive">Receive</string>
+    <string name="triomav_activity">Activity</string>
+    <string name="triomav_help">Help</string>
+    <string name="triomav_profile">Profile</string>
+    <string name="triomav_recent">Recent payments</string>
+    <string name="triomav_no_payments">Your payments will appear here.</string>
+    <string name="triomav_payment_needs_check">A payment needs checking</string>
+    <string name="triomav_check_before_retry">Check your bank or payment app before paying again.</string>
+    <string name="triomav_enter_upi_id">Recipient UPI ID</string>
+    <string name="triomav_enter_manually">Enter payment manually instead</string>
+    <string name="triomav_enter_amount">Amount in rupees</string>
+    <string name="triomav_recipient">Recipient</string>
+    <string name="triomav_payment_note">Payment note from QR</string>
+    <string name="triomav_merchant_reference">Merchant reference from QR</string>
+    <string name="triomav_review">Review payment</string>
+    <string name="triomav_qr_name_unverified">Name supplied by the QR. Confirm the recipient in your payment app.</string>
+    <string name="triomav_amount_hint">Enter an amount, for example 80 or 80.50.</string>
+    <string name="triomav_invalid_upi_id">Enter a valid UPI ID.</string>
+    <string name="triomav_invalid_amount">Enter an amount greater than zero, with up to two decimals.</string>
+    <string name="triomav_invalid_payment_details">These payment details cannot be used. Check the amount or scan the QR again.</string>
+    <string name="triomav_continue">Continue</string>
+    <string name="triomav_pay_in_upi_app">Continue in a UPI app</string>
+    <string name="triomav_opening_route">Opening payment…</string>
+    <string name="triomav_pay_by_phone">Continue by phone</string>
+    <string name="triomav_route_unavailable">No supported payment route is available right now.</string>
+    <string name="triomav_route_changed">Your connection or phone-payment setup changed. Review the available route before continuing.</string>
+    <string name="triomav_phone_route_note">Your phone payment service will ask you to complete the payment. Check the recipient and amount there.</string>
+    <string name="triomav_upi_route_note">You will finish and confirm this payment in your chosen UPI app.</string>
+    <string name="triomav_qr_reference_requires_online">This merchant QR needs an online UPI app to keep its order details. Connect to the internet and try again.</string>
+    <string name="triomav_qr_needs_direct_scan">This signed QR cannot carry the details reviewed here. Scan it directly in your UPI app and enter the amount there.</string>
+    <string name="triomav_handoff_unknown">Check the payment result</string>
+    <string name="triomav_handoff_unknown_detail">Your UPI app handles this payment. TrioMav Pay cannot confirm whether it completed yet. Check that app or your bank before paying again.</string>
+    <string name="triomav_phone_unknown_detail">The phone payment may still complete. TrioMav Pay can match some bank SMS, but it cannot always confirm a debit. Check your bank before paying again.</string>
+    <string name="triomav_no_upi_app">No UPI app opened on this phone.</string>
+    <string name="triomav_payment_not_saved">Could not save this payment attempt. No payment app was opened.</string>
+    <string name="triomav_repeat_warning">A payment to this UPI ID for the same amount still needs checking.</string>
+    <string name="triomav_checked_make_new">I checked my bank — make a new payment</string>
+    <string name="triomav_back">Back</string>
+    <string name="triomav_home">Home</string>
+    <string name="triomav_ready_online">Internet available</string>
+    <string name="triomav_ready_phone">Internet unavailable — phone payment may still work</string>
+    <string name="triomav_receive_title">Receive with your UPI ID</string>
+    <string name="triomav_receive_hint">Enter an existing UPI ID from your bank or another UPI app. TrioMav Pay does not create or verify it.</string>
+    <string name="triomav_your_upi_id">Your UPI ID</string>
+    <string name="triomav_save_upi_id">Save UPI ID</string>
+    <string name="triomav_upi_id_saved">UPI ID saved on this phone.</string>
+    <string name="triomav_share_this_qr">Ask the payer to scan this QR in their UPI app. Confirm receipt in your bank account.</string>
+    <string name="triomav_share_qr">Share receive QR</string>
+    <string name="triomav_copy_upi_id">Copy displayed UPI ID</string>
+    <string name="triomav_qr_unsaved_changes">Save your changes to update the displayed QR.</string>
+    <string name="triomav_qr_unavailable">Could not create this QR. Check your UPI ID and save again.</string>
+    <string name="triomav_qr_share_failed">Could not share the QR. You can copy your UPI ID instead.</string>
+    <string name="triomav_receive_share_caption">Pay %1$s using this UPI QR. Confirm the recipient in your payment app.</string>
+    <string name="triomav_receive_name_required">Enter your name for the receive QR, using up to 99 characters.</string>
+    <string name="triomav_copied">Copied to clipboard.</string>
+    <string name="triomav_copy_payment_details">Copy details for support</string>
+    <string name="triomav_reference_unavailable">Not available</string>
+    <string name="triomav_support_summary">TrioMav Pay payment record\nRecipient: %1$s\nAmount: ₹%2$s\nTime: %3$s\nStatus: %4$s\nBank reference: %5$s\nApp attempt ID: %6$s\n%7$s</string>
+    <string name="triomav_app_settings">App permissions</string>
+    <string name="triomav_help_title">When a payment is unclear</string>
+    <string name="triomav_help_step_one">Open the payment in Activity and note the recipient, amount and time.</string>
+    <string name="triomav_help_step_two">Check your bank or the UPI app that completed the payment.</string>
+    <string name="triomav_help_step_three">If money moved but the recipient did not receive it, report it through that bank or UPI app.</string>
+    <string name="triomav_profile_title">Your payment setup</string>
+    <string name="triomav_profile_flowpay">Phone payment setup</string>
+    <string name="triomav_profile_flowpay_detail">Set up and test phone payments for times when mobile data is unavailable.</string>
+    <string name="triomav_status_sms_match">Bank SMS matched — check receipt</string>
+    <string name="triomav_status_failed">Bank reported a failure</string>
+    <string name="triomav_status_check">Check this payment</string>
+    <string name="triomav_status_not_started">Not started</string>
+    <string name="triomav_detail_not_started">TrioMav Pay did not open a UPI app for this attempt. No payment was started from this record.</string>
+    <string name="triomav_detail_sms_match">A bank SMS matched this attempt. Check the recipient and receipt in your bank or UPI app.</string>
+    <string name="triomav_detail_failed">The bank reported a failure. Check your account for any debit or reversal.</string>
+    <string name="triomav_enter_name">Recipient name</string>
+    <string name="triomav_enter_name_hint">A name entered here is only a label. Confirm the recipient in the UPI app.</string>
+    <string name="triomav_invalid_name">Enter the recipient name, using up to 99 characters without line breaks.</string>
+    <string name="triomav_your_name">Your name for this QR</string>
+    <string name="triomav_pay_phone_number">Pay a mobile number</string>
+    <string name="triomav_activity_unavailable">Payment activity is temporarily unavailable.</string>
+    <string name="triomav_payment_details">Payment details</string>
+    <string name="triomav_reference">Bank reference</string>
+    <string name="triomav_overlay_permission">TrioMav Pay needs overlay permission to keep the payment details visible during the call.</string>
+    <string name="triomav_sms_permission">TrioMav Pay receives bank SMS only while a phone payment is in progress, to help detect confirmation. It never reads your inbox or uploads messages.</string>
+    <string name="triomav_contacts_permission">TrioMav Pay needs contact access so you can pick a recipient by name.</string>
     
     <!-- Setup Screen Strings -->
-    <string name="setup_flowpay">Setup Flowpay</string>
+    <string name="setup_flowpay">Set up phone payments</string>
     <string name="configure_upi_payments">Configure your UPI payments</string>
     <string name="bank_selection">Bank Selection</string>
     <string name="choose_primary_bank">Choose your primary bank for UPI payments</string>
@@ -12,8 +105,8 @@
     <string name="secondary_sim">Secondary SIM</string>
     <string name="complete_setup">Complete Setup</string>
     <string name="disclaimer">Disclaimer</string>
-    <string name="disclaimer_summary">Flowpay never touches your money or your UPI PIN. It only dials your bank\'s *99# / UPI 123 flow for you. Tap to read the full disclaimer.</string>
-    <string name="disclaimer_text">Flowpay is a free, open-source app. It is not a bank, wallet, or payment processor, and it never holds, moves, or has access to your money.\n\nAll Flowpay does is dial for you. It automates your bank\'s *99# / UPI 123 (UPI 123PAY) menu. Every payment is authorised and processed directly by you, your bank, and NPCI over your mobile network, exactly as if you had dialled it yourself. Flowpay is not affiliated with or endorsed by NPCI or any bank.\n\nYour UPI PIN never touches Flowpay. The app does not use Android accessibility services, screen reading, or any form of input capture. You enter your PIN only inside your bank\'s own *99# / IVR flow, where Flowpay cannot see it, intercept it, or store it.\n\nYour data stays on your device. Flowpay reads incoming bank SMS only while a payment is in progress, and only to detect the confirmation. It never uploads your messages, contacts, or transaction history anywhere.\n\nBy continuing, you confirm that you have read and understood this.</string>
+    <string name="disclaimer_summary">TrioMav Pay never touches your money or your UPI PIN. Phone payments use your bank\'s *99# / UPI 123 flow. Tap to read the full disclaimer.</string>
+    <string name="disclaimer_text">TrioMav Pay is not a bank, wallet, or payment processor, and it never holds, moves, or has access to your money.\n\nFor phone payments, TrioMav Pay dials your bank\'s *99# / UPI 123 (UPI 123PAY) menu. Every payment is authorised and processed directly by you, your bank, and NPCI over your mobile network. TrioMav Pay is not affiliated with or endorsed by NPCI or any bank.\n\nYour UPI PIN never touches TrioMav Pay. The app does not use Android accessibility services, screen reading, or input capture. You enter your PIN only inside your bank\'s own *99# / IVR flow.\n\nYour data stays on your device. TrioMav Pay receives incoming bank SMS only while a phone payment is in progress, and only to help detect a confirmation. It never uploads your messages, contacts, or transaction history.\n\nBy continuing, you confirm that you have read and understood this.</string>
     
     <!-- Bank Names -->
     
@@ -35,10 +128,10 @@
          release builds are minified, so `e.message` there reads as an
          R8-obfuscated class name. The detail belongs in the adjacent
          Log.e(TAG, "…", e) call, which carries the throwable. -->
-    <string name="error_permissions_denied">Some permissions were denied. Flowpay may not work correctly without them.</string>
-    <string name="error_call_permission_denied">Flowpay needs permission to place the call.</string>
+    <string name="error_permissions_denied">Some permissions were denied. Phone payments may not work without them.</string>
+    <string name="error_call_permission_denied">TrioMav Pay needs permission to place the call.</string>
     <string name="error_call_failed">Could not start the payment call. Please try again.</string>
-    <string name="error_audio_permission">Flowpay needs permission to adjust call audio.</string>
+    <string name="error_audio_permission">TrioMav Pay needs permission to adjust call audio.</string>
     <string name="error_audio_lower_failed">Could not lower the call volume.</string>
     <string name="error_audio_restore_failed">Could not restore the call volume.</string>
     <string name="error_qr_scanner_init">Could not open the QR scanner.</string>
@@ -49,7 +142,7 @@
     <string name="error_enter_phone_and_amount">Enter both a phone number and an amount.</string>
     <string name="error_invalid_phone_number">Enter a valid 10-digit phone number.</string>
     <string name="error_invalid_amount">Enter a valid amount.</string>
-    <string name="error_phone_permission_required">Flowpay needs phone permissions to place the payment call.</string>
+    <string name="error_phone_permission_required">TrioMav Pay needs phone permissions to place the payment call.</string>
     <string name="error_payment_not_started">The payment could not be started. Please try again.</string>
     <string name="error_call_permission_required_ussd">Phone call permission is required to test USSD.</string>
     <string name="error_call_permission_required_payments">Phone call permission is required for USSD payments.</string>
@@ -73,13 +166,13 @@
     <!-- Fallback toasts, shown only when the payment-result dialog itself
          cannot be displayed. They carry the same outcome as the dialog they
          stand in for, shortened to fit a toast. -->
-    <string name="toast_payment_cancelled">Payment cancelled. No payment was processed.</string>
+    <string name="toast_payment_cancelled">Call cancelled. Check your bank before retrying.</string>
     <string name="toast_payment_failed">Your bank reported the payment as failed.</string>
     <string name="toast_awaiting_confirmation">Request sent — waiting for your bank\'s confirmation SMS.</string>
     <string name="warn_voice_sim_mismatch">Note: this call will use your default calling SIM (%1$s), which doesn\'t look like the %2$s SIM from setup. If the payment fails, switch your default calling SIM.</string>
 
     <!-- Progress and outcome notices from setup and the connectivity test -->
-    <string name="status_requesting_permissions">Requesting the permissions Flowpay needs…</string>
+    <string name="status_requesting_permissions">Requesting the permissions phone payments need…</string>
     <string name="status_opening_scanner">Opening the QR scanner…</string>
     <string name="status_permissions_granted_ussd">Permissions granted. You can test USSD now.</string>
     <string name="status_setup_complete">Setup complete.</string>
@@ -94,7 +187,7 @@
     <string name="qr_status_call_initiated">Call started</string>
     <string name="qr_status_complete_in_dialer">Complete the payment in the dialer, then wait for your bank\'s confirmation SMS. This can take a minute or two.</string>
     <string name="qr_status_ussd_completed">Waiting for your bank\'s confirmation SMS…</string>
-    <string name="qr_status_terminated">Cancelled. Returning to the main screen…</string>
+    <string name="qr_status_terminated">Call closed. Check this payment in your bank app before retrying.</string>
 
     <!-- Success Messages -->
 
@@ -105,12 +198,12 @@
     <!-- Payment result dialogs (shown over the dialer). There is no success
          dialog: PaymentResultActivity is the only success surface. -->
     <string name="dialog_cancelled_title">Transaction Cancelled</string>
-    <string name="dialog_cancelled_message">The call ended before the payment flow could complete. No payment was processed.</string>
-    <string name="dialog_cancelled_by_user_message">The transaction was cancelled. No payment was processed.</string>
+    <string name="dialog_cancelled_message">The payment call ended. Check your bank account before retrying.</string>
+    <string name="dialog_cancelled_by_user_message">The payment call was cancelled. Check your bank account before retrying.</string>
     <string name="dialog_failed_title">Transaction Failed</string>
     <string name="dialog_failed_message">Your bank reported the payment as failed. Any debited amount is normally reversed automatically — check your bank if it isn\'t.</string>
     <string name="dialog_awaiting_title">Request Sent</string>
-    <string name="dialog_awaiting_message">Your payment request was sent to the UPI service.\n\nIf your bank calls back, press 1 to confirm and enter your UPI PIN. Flowpay will show the result as soon as your bank\'s confirmation SMS arrives.</string>
+    <string name="dialog_awaiting_message">This payment may still complete. TrioMav Pay will watch for a bank SMS, but some banks do not send one. Check your bank app or statement before retrying.</string>
     <string name="action_ok">OK</string>
     <string name="action_got_it">Got it</string>
     <string name="action_transfer">Transfer</string>
@@ -127,13 +220,16 @@
     <string name="status_label_needs_review">Check</string>
     <string name="status_label_cancelled">Cancelled</string>
     <string name="status_label_failed">Failed</string>
+    <string name="verification_filter">Check payments (%1$d)</string>
+    <string name="verification_show_all">Show all payments</string>
+    <string name="verification_instructions">Open each attempt and compare the amount, payee, time and bank reference with your bank app or statement. If you see a debit, do not pay again until you confirm the outcome with your bank. TrioMav Pay cannot verify a bank debit without bank evidence.</string>
 
     <!-- Transaction status explainers -->
-    <string name="status_explainer_pending">Waiting for your bank\'s confirmation SMS.</string>
-    <string name="status_explainer_unverified">No confirmation SMS arrived. The payment may still have gone through — check your bank statement or SMS inbox before retrying.</string>
-    <string name="status_explainer_cancelled">The payment flow ended before completing. No money should have moved.</string>
+    <string name="status_explainer_pending">Waiting for a bank SMS. Check your bank app if you already entered your PIN.</string>
+    <string name="status_explainer_unverified">No bank confirmation is available yet. The payment may still have gone through — check your bank app or statement before retrying.</string>
+    <string name="status_explainer_cancelled">The call did not start. Check your bank if you had already entered your PIN.</string>
     <string name="status_explainer_failed">Your bank reported this payment as failed. Any debited amount is normally auto-reversed.</string>
-    <string name="status_explainer_needs_review">A bank SMS arrived during this payment but its amount didn\'t match. Check your bank statement before retrying.</string>
+    <string name="status_explainer_needs_review">A bank SMS arrived, but TrioMav Pay cannot safely link it to this payment. Compare the amount, payee and bank reference in your bank app before retrying.</string>
 
     <!-- Payment result notifications -->
     <string name="notif_channel_payment_results">Payment results</string>
@@ -164,7 +260,7 @@
     <string name="overlay_terminate">Cancel payment</string>
     <string name="overlay_connecting">Connecting to the UPI service…</string>
     <string name="overlay_sending_request">Sending your payment request…</string>
-    <string name="overlay_pin_notice">Flowpay never asks for your UPI PIN. Your bank will call you — enter your PIN on that call.</string>
+    <string name="overlay_pin_notice">TrioMav Pay never asks for your UPI PIN. Your bank will call you — enter your PIN on that call.</string>
     <string name="overlay_request_sent">Request sent. Waiting for your bank\'s confirmation SMS…</string>
     <string name="amount_rupees">₹%1$s</string>
     <string name="percent_format">%1$d%%</string>
@@ -181,6 +277,7 @@
     <string name="qr_reason_no_payee">it carries no payee address</string>
     <string name="qr_reason_invalid_payee">its payee address is not valid</string>
     <string name="qr_reason_invalid_amount">its amount is not valid</string>
+    <string name="qr_reason_invalid_currency">its currency is not INR</string>
     <!-- QR scanner steps -->
     <string name="qr_torch">Torch</string>
     <string name="qr_pick_from_gallery">Scan a QR code from your gallery</string>

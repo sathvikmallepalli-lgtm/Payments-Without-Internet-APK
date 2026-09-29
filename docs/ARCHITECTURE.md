@@ -13,9 +13,9 @@ known simplifications are deliberate.
 call state or call duration.** Everything below serves this. A dialed call
 that connects and ends "normally" proves nothing; only the bank's own
 confirmation SMS, matched to the amount that was sent, promotes a payment to
-SUCCESS. When no SMS arrives before the deadline, the attempt is discarded
-and nothing is shown — an outcome the bank never confirmed is not one this
-app can report on, and it is never silently assumed either way.
+SUCCESS. When no SMS arrives, the attempt remains UNVERIFIED and visible in
+history. A bank can complete the debit without sending an SMS, so the user
+must check their bank app or statement before retrying.
 
 ## Composition root
 
@@ -55,10 +55,10 @@ begin(phone, amount)          [QR: begin("", amount?, upiId, source=QR)]
    │  mid-call still leaves a record of the attempt
    ▼
 Initiating ──OFFHOOK──▶ InProgress ──call ends──▶ WaitingForVerification
-   │                        │  (short call <5s ⇒ Cancelled, never SUCCESS)     │
+   │                        │  (short call <5s ⇒ VerificationPending)          │
    │                        │                                                   │
    └── dial failed /        └───────────── confirming bank SMS ────────────────┤
-       call never started              (onSmsConfirmed)                         │
+       exit before dial               (onSmsConfirmed)                          │
               │                                                                 ▼
               ▼                              ┌── amount matches ⇒ Success ──────┤
            Cancelled                         ├── amount mismatch ⇒ dropped,     │
@@ -66,23 +66,22 @@ Initiating ──OFFHOOK──▶ InProgress ──call ends──▶ WaitingFor
         closes the SMS window, so a          │   real confirmation              │
         later debit can't be adopted         └── failure keyword ⇒ Failed       │
         onto the cancelled row)                                                 │
-   no SMS before the 10-minute deadline ⇒ Timeout, and the PENDING row is DELETED
-                                             │
-                    Nothing is surfaced: a payment the bank never confirmed
-                    leaves no record. The SMS window outlives the deadline by
-                    30s, so a late-but-genuine confirmation still lands — with
-                    no row to adopt it is saved as a standalone transaction.
+   user exits after dial ⇒ VerificationPending + UNVERIFIED row
+   Android does not report OFFHOOK after dial ⇒ VerificationPending
+   no SMS before the 10-minute deadline ⇒ Timeout + UNVERIFIED row
+   late matching SMS after exit ⇒ NEEDS_REVIEW, not automatic SUCCESS
+   (a same-amount debit alone cannot prove it belongs to this attempt)
 ```
 
-Every terminal transition `join()`s the pending-insert coroutine first, so
-the PENDING row always exists before it's updated. Stale PENDING rows left by
-a killed process are discarded lazily (`reconcileStalePending` on app start).
+Every status update `join()`s the pending-insert coroutine first. Stale
+PENDING rows left by a killed process become UNVERIFIED lazily
+(`reconcileStalePending` on app start).
 If the process died mid-payment and the confirming SMS arrives after restart,
 the ingestion pipeline *reattaches* it: the session txnId is persisted in the
 operation window at `begin()`, and a no-live-session confirmation updates that
-still-PENDING row instead of inserting a duplicate. Adoption is guarded to
-PENDING rows in SQL, so a confirmation can never rewrite a row the user
-already cancelled. The QR flow runs through the same session lifecycle — it
+PENDING or UNVERIFIED row instead of inserting a duplicate. An SMS attached
+to an UNVERIFIED row is marked NEEDS_REVIEW; CANCELLED rows cannot be adopted.
+The QR flow runs through the same session lifecycle — it
 used to bypass it entirely. The `PaymentState` sealed hierarchy carries
 exactly the states the machine emits — dead QR/retry variants were removed so
 the type reflects reality.

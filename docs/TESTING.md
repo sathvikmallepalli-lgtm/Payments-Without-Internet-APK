@@ -26,8 +26,8 @@ Pure logic, no Android framework, no device. Runs in seconds via
   driven with `kotlinx-coroutines-test` and fakes for the call-state source
   and the persistence layer. Covers the PENDING-before-dial invariant,
   every terminal transition (Success/Failed/Cancelled/Timeout — where a
-  Timeout discards the unconfirmed row and a later SMS cannot resurrect a
-  cancelled one),
+  Timeout preserves an UNVERIFIED row and a late SMS cannot resurrect a
+  never-started cancelled call),
   and — since Phase 3 — that `onUserCancelled`/`onCallNeverStarted` reach a
   correct, idempotent terminal state even when called defensively more than
   once (the scenario `CallOverlayService`'s exception-handling paths rely on).
@@ -120,13 +120,13 @@ The same two broadcasts cover the cases that are easy to regress:
   confirmation still lands.
 - **Unrelated incoming credit.** A genuine `credited`-only body during an
   open window must be ignored without closing the window.
-- **Cancel really cancels.** Start a payment from the app, hit *Cancel
-  payment* on the overlay, then inject a matching debit. Nothing should
-  surface, and the row must stay CANCELLED —
-  `adb shell run-as com.flowpay.app cat shared_prefs/payment_operation.xml`
-  should show the window cleared.
-- **No SMS, no record.** Open a window, inject nothing, and let the deadline
-  pass: no result screen, no notification, and no row in either list.
+- **Cancel after dial still needs verification.** Start a payment, hit
+  *Cancel payment* after the call begins, and confirm the history row is
+  UNVERIFIED. The SMS window remains open. Inject a matching debit: the row
+  must become NEEDS_REVIEW, never SUCCESS.
+- **No SMS, visible attempt.** Open a window, inject nothing, and let the
+  deadline pass: the attempt must remain UNVERIFIED in the history review
+  filter. Check the bank app or statement before retrying.
 
 ## Layer 4 — Physical-device release gate (human, per release)
 

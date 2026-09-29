@@ -142,6 +142,7 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "Flowpay"
+        const val EXTRA_OPEN_PHONE_PAYMENT = "com.flowpay.app.extra.OPEN_PHONE_PAYMENT"
     }
 
     // Helper for all business logic
@@ -284,6 +285,7 @@ class MainActivity : ComponentActivity() {
             CompositionLocalProvider(LocalFlowpayAccentTheme provides BlueAccentTheme) {
                 FlowpayTheme {
                     MainScreen(
+                        openPhonePayment = intent.getBooleanExtra(EXTRA_OPEN_PHONE_PAYMENT, false),
                         onInitiateTransfer = { phoneNumber, amount ->
                             helper.initiateTransfer(phoneNumber, amount)
                         },
@@ -566,8 +568,14 @@ private fun PayContactButton(
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+// The existing FlowPay screen owns its permission gates; TrioMav reuses them.
+@Suppress(
+    "LongMethod",
+    "CyclomaticComplexMethod",
+)
 @Composable
 fun MainScreen(
+    openPhonePayment: Boolean = false,
     onInitiateTransfer: (String, String) -> Unit,
     onQRScanClick: () -> Unit,
     onRequestOverlayPermission: () -> Unit
@@ -666,6 +674,28 @@ fun MainScreen(
                 }
             }
         }
+    }
+
+    val openPayContact = {
+        maybeAskNotifications()
+        val hasSms = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.RECEIVE_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+        when {
+            !isUpi123Ready -> context.startActivity(
+                Intent(context, TestConfigurationActivity::class.java)
+            )
+            !PermissionManager.canDrawOverlays(context) -> showOverlayPermissionDialog = true
+            !hasSms -> {
+                pendingSmsAction = { showPayContact = true }
+                showSmsPermissionDialog = true
+            }
+            else -> showPayContact = true
+        }
+    }
+
+    LaunchedEffect(openPhonePayment) {
+        if (openPhonePayment) openPayContact()
     }
 
     // One-shot events from MainActivity (launchers + business-logic helper),
@@ -776,7 +806,7 @@ fun MainScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Flowpay",
+                                        text = stringResource(R.string.app_name),
                                         fontSize = 24.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White,
@@ -907,33 +937,7 @@ fun MainScreen(
                             }
                         }
                     },
-                    onPayContactClick = {
-                        maybeAskNotifications()
-                        val hasSms = ContextCompat.checkSelfPermission(
-                            context, Manifest.permission.RECEIVE_SMS
-                        ) == PackageManager.PERMISSION_GRANTED
-                        when {
-                            // UPI 123 IVR not verified yet — the button is in its
-                            // "Set up UPI 123 IVR" state; take the user to the
-                            // *99# / UPI 123 test screen instead of the pay dialog.
-                            !isUpi123Ready -> {
-                                context.startActivity(
-                                    Intent(context, TestConfigurationActivity::class.java)
-                                )
-                            }
-                            // Overlay permission is required before the payment
-                            // call can show its UI, so ask now — not after the
-                            // user has filled in the transfer details.
-                            !PermissionManager.canDrawOverlays(context) -> {
-                                showOverlayPermissionDialog = true
-                            }
-                            !hasSms -> {
-                                pendingSmsAction = { showPayContact = true }
-                                showSmsPermissionDialog = true
-                            }
-                            else -> showPayContact = true
-                        }
-                    },
+                    onPayContactClick = openPayContact,
                     isUpi123Ready = isUpi123Ready,
                     isUssdReady = isUssdReady,
                     isScanning = isScanning
@@ -1150,7 +1154,7 @@ fun MainScreen(
             if (showOverlayPermissionDialog) {
                 PermissionExplanationDialog(
                     title = "Overlay Permission",
-                    message = "Flowpay needs overlay permission to show a payment UI anchor during the call. This keeps your transaction details visible while the call is in progress.",
+                    message = stringResource(R.string.triomav_overlay_permission),
                     confirmButtonText = "Grant",
                     onConfirm = {
                         showOverlayPermissionDialog = false
@@ -1163,7 +1167,7 @@ fun MainScreen(
             if (showSmsPermissionDialog) {
                 PermissionExplanationDialog(
                     title = "SMS Permission",
-                    message = "Flowpay reads incoming bank SMS only while a payment is in progress, to detect the confirmation. It never reads your inbox and nothing leaves the device.",
+                    message = stringResource(R.string.triomav_sms_permission),
                     confirmButtonText = "Grant",
                     onConfirm = {
                         showSmsPermissionDialog = false
@@ -1476,7 +1480,7 @@ fun PayContactDialog(
     if (showContactPermissionDialog) {
         PermissionExplanationDialog(
             title = "Contacts Permission",
-            message = "Flowpay needs access to your contacts so you can pick a recipient by name instead of typing their number.",
+            message = stringResource(R.string.triomav_contacts_permission),
             confirmButtonText = "Grant",
             onConfirm = {
                 showContactPermissionDialog = false

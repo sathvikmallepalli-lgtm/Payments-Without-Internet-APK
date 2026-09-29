@@ -21,6 +21,9 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class QRCodeParserTest {
+    private companion object {
+        const val OVERLONG_QR_LENGTH = 4100
+    }
 
     private fun valid(qr: String): com.flowpay.app.data.UPIData {
         val result = QRCodeParser.parse(qr)
@@ -35,11 +38,14 @@ class QRCodeParserTest {
 
     @Test
     fun `full npci qr parses all fields`() {
-        val data = valid("upi://pay?pa=merchant@okhdfcbank&pn=Test%20Store&am=150.00&tn=Bill%20payment")
+        val raw = "upi://pay?pa=merchant@okhdfcbank&pn=Test%20Store&am=150.00&tn=Bill%20payment"
+        val data = valid(raw)
         assertEquals("merchant@okhdfcbank", data.vpa)
         assertEquals("Test Store", data.payeeName)
         assertEquals("150.00", data.amount)
         assertEquals("Bill payment", data.transactionNote)
+        assertEquals(raw, data.originalQrUri)
+        assertTrue(QRCodeParser.requiresOnlineRoute(data))
     }
 
     @Test
@@ -47,6 +53,7 @@ class QRCodeParserTest {
         val data = valid("upi://pay?pa=a.b@ybl&pn=Someone")
         assertEquals("a.b@ybl", data.vpa)
         assertEquals("", data.amount)
+        assertTrue(!QRCodeParser.requiresOnlineRoute(data))
     }
 
     @Test
@@ -102,6 +109,15 @@ class QRCodeParserTest {
     fun `legacy adapter returns empty vpa on invalid input`() {
         assertEquals("", QRCodeParser.parseUPIQRCode("not a qr").vpa)
         assertEquals("ok@ybl", QRCodeParser.parseUPIQRCode("upi://pay?pa=ok@ybl").vpa)
+    }
+
+    @Test
+    fun `ambiguous or unsupported payment qrs are rejected`() {
+        invalid("upi://collect?pa=ok@ybl")
+        invalid("upi://pay?pa=ok@ybl&pa=other@ybl")
+        invalid("upi://pay?pa=ok@ybl&am=10&am=100")
+        invalid("upi://pay?pa=ok@ybl&cu=USD")
+        invalid("upi://pay?pa=ok@ybl&tn=${"x".repeat(OVERLONG_QR_LENGTH)}")
     }
 
     @Test

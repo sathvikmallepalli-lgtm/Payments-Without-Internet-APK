@@ -294,6 +294,9 @@ class CallOverlayService : Service() {
                     PROGRESS_COMPLETE_HOLD_MS
                 )
             }
+            is PaymentState.VerificationPending -> {
+                finishWithResult { dialogManager?.showAwaitingConfirmation() }
+            }
             is PaymentState.Success -> {
                 vibrate()
                 endCallOnConfirmation()
@@ -323,9 +326,7 @@ class CallOverlayService : Service() {
                 }
             }
             is PaymentState.Timeout -> {
-                // No bank SMS by the deadline means there is no confirmed
-                // payment to report: the row is discarded and nothing is
-                // shown. Just wind the overlay down.
+                // The attempt remains visible as UNVERIFIED in history.
                 finishWithResult { }
             }
             else -> Unit

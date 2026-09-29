@@ -58,6 +58,13 @@ sealed class PaymentState {
         val transactionId: String
     ) : PaymentState()
 
+    /** The user left an already-started payment flow. The bank may still debit. */
+    data class VerificationPending(
+        val phoneNumber: String,
+        val amount: String,
+        val transactionId: String
+    ) : PaymentState()
+
     /**
      * State when payment is successfully completed
      * @param transactionId Unique transaction identifier
@@ -142,7 +149,8 @@ sealed class PaymentState {
     /**
      * Checks if the payment is in progress
      */
-    fun isInProgress(): Boolean = this is Initiating || this is InProgress || this is WaitingForVerification
+    fun isInProgress(): Boolean =
+        this is Initiating || this is InProgress || this is WaitingForVerification || this is VerificationPending
 
     /**
      * Checks if the payment can be retried
@@ -160,6 +168,7 @@ sealed class PaymentState {
         is Initiating -> this.transactionId
         is InProgress -> this.transactionId
         is WaitingForVerification -> this.transactionId
+        is VerificationPending -> this.transactionId
         is Success -> this.transactionId
         is Failed -> this.transactionId
         is NeedsReview -> this.transactionId
@@ -175,6 +184,7 @@ sealed class PaymentState {
         is Initiating -> this.phoneNumber
         is InProgress -> this.phoneNumber
         is WaitingForVerification -> this.phoneNumber
+        is VerificationPending -> this.phoneNumber
         is Success -> this.phoneNumber
         is Failed -> this.phoneNumber
         is NeedsReview -> this.phoneNumber
@@ -190,6 +200,7 @@ sealed class PaymentState {
         is Initiating -> this.amount
         is InProgress -> this.amount
         is WaitingForVerification -> this.amount
+        is VerificationPending -> this.amount
         is Success -> this.amount
         is Failed -> this.amount
         is NeedsReview -> this.amount
@@ -217,6 +228,7 @@ fun PaymentState.getDisplayMessage(): String = when (this) {
     is PaymentState.Initiating -> "Initiating payment..."
     is PaymentState.InProgress -> "Processing: $step"
     is PaymentState.WaitingForVerification -> "Waiting for bank verification..."
+    is PaymentState.VerificationPending -> "Check your bank for the payment outcome"
     is PaymentState.Success -> "Payment successful!"
     is PaymentState.Failed -> "Payment failed: $error"
     is PaymentState.NeedsReview -> "Payment needs review — check your bank statement"
@@ -229,6 +241,7 @@ fun PaymentState.getProgressPercentage(): Float = when (this) {
     is PaymentState.Initiating -> 0.1f
     is PaymentState.InProgress -> progress
     is PaymentState.WaitingForVerification -> 0.7f
+    is PaymentState.VerificationPending -> 0.7f
     is PaymentState.Success -> 1f
     is PaymentState.Failed -> 0f
     is PaymentState.NeedsReview -> 1f

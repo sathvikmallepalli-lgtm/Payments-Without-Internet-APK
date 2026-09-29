@@ -60,6 +60,10 @@ import java.util.concurrent.Executors
 class QRScannerActivity : ComponentActivity() {
 
     companion object {
+        /** TrioMav Pay can reuse the camera without starting a payment. */
+        const val EXTRA_PICK_ONLY = "com.flowpay.app.extra.PICK_ONLY"
+        const val EXTRA_SCANNED_UPI = "com.flowpay.app.extra.SCANNED_UPI"
+        const val EXTRA_REVIEWED_UPI = "com.flowpay.app.extra.REVIEWED_UPI"
         const val RESULT_CANCELLED = 0
         const val RESULT_SUCCESS = 1
         const val RESULT_ERROR = 2
@@ -245,11 +249,13 @@ class QRScannerActivity : ComponentActivity() {
             super.onCreate(savedInstanceState)
             setContentView(R.layout.activity_qr_scanner)
 
-            SetupHelper.getScanToPayBlockedMessage(this)?.let { msg ->
-                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-                setResult(RESULT_CANCELLED)
-                finish()
-                return
+            if (!intent.getBooleanExtra(EXTRA_PICK_ONLY, false)) {
+                SetupHelper.getScanToPayBlockedMessage(this)?.let { msg ->
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                    setResult(RESULT_CANCELLED)
+                    finish()
+                    return
+                }
             }
 
             // Initialize views
@@ -268,6 +274,11 @@ class QRScannerActivity : ComponentActivity() {
             btnGallery = findViewById(R.id.btnGallery)
             bottomActionBar = findViewById(R.id.bottomActionBar)
             scanLine = findViewById(R.id.scanLine)
+
+            if (intent.getBooleanExtra(EXTRA_PICK_ONLY, false)) {
+                topBar.visibility = View.VISIBLE
+                findViewById<View>(R.id.pickModeHint).visibility = View.VISIBLE
+            }
 
             applyWindowInsets()
 
@@ -320,8 +331,21 @@ class QRScannerActivity : ComponentActivity() {
             val smsFilter = IntentFilter("com.flowpay.app.SMS_RECEIVED")
             LocalBroadcastManager.getInstance(this).registerReceiver(smsReceiver, smsFilter)
 
-            Log.d("QRScanner", "Starting permission check...")
-            checkPermissionsAndStartCamera()
+            @Suppress("DEPRECATION")
+            val reviewedPayment = intent.getParcelableExtra<UPIData>(EXTRA_REVIEWED_UPI)
+            if (reviewedPayment != null) {
+                // TrioMav Pay already scanned and reviewed this payment.
+                // Reuse the FlowPay USSD path without asking for another scan.
+                if (QRCodeParser.requiresOnlineRoute(reviewedPayment)) {
+                    Toast.makeText(this, R.string.triomav_qr_reference_requires_online, Toast.LENGTH_LONG).show()
+                    finish()
+                } else {
+                    initiateUSSDPayment(reviewedPayment)
+                }
+            } else {
+                Log.d("QRScanner", "Starting permission check...")
+                checkPermissionsAndStartCamera()
+            }
         } catch (e: Exception) {
             Log.e("QRScanner", "Error in onCreate", e)
             Toast.makeText(this, R.string.error_qr_scanner_init, Toast.LENGTH_LONG).show()
@@ -477,7 +501,17 @@ class QRScannerActivity : ComponentActivity() {
             when (val result = QRCodeParser.parse(qrCode)) {
                 is QRCodeParser.ParseResult.Valid -> {
                     Log.d("QRScanner", "Successfully parsed UPI data")
-                    initiateUSSDPayment(result.data)
+                    if (intent.getBooleanExtra(EXTRA_PICK_ONLY, false)) {
+                        setResult(
+                            RESULT_OK,
+                            Intent().putExtra(EXTRA_SCANNED_UPI, result.data)
+                        )
+                        finish()
+                    } else if (QRCodeParser.requiresOnlineRoute(result.data)) {
+                        showInvalidQrCode(getString(R.string.triomav_qr_reference_requires_online))
+                    } else {
+                        initiateUSSDPayment(result.data)
+                    }
                 }
                 is QRCodeParser.ParseResult.Invalid -> {
                     Log.w("QRScanner", "QR rejected: ${result.reason.name}")
@@ -527,10 +561,21 @@ class QRScannerActivity : ComponentActivity() {
                         Log.d("QRScanner", "USSD already dialed this flow, skipping duplicate dial")
                         return@postDelayed
                     }
-                    hasDialedUSSD = true
-                    Log.d("QRScanner", "Dialing USSD code: *99*1*3#")
-                    updateBlackScreenStatus(R.string.qr_status_initiating_call)
-                    dialUSSD()
+                    val sessionManager = FlowpayApplication.from(this)?.paymentSessionManager
+                    val txnId = TransactionDetector.getInstance(this).getSessionTxnId()
+                    lifecycleScope.launch {
+                        if (sessionManager == null || txnId == null ||
+                            !sessionManager.awaitPendingInsert(txnId)
+                        ) {
+                            if (isActivityAlive()) showError(getString(R.string.error_payment_init_failed))
+                            return@launch
+                        }
+                        if (!isActivityAlive()) return@launch
+                        hasDialedUSSD = true
+                        Log.d("QRScanner", "Dialing USSD code: *99*1*3#")
+                        updateBlackScreenStatus(R.string.qr_status_initiating_call)
+                        dialUSSD()
+                    }
                 } catch (e: Exception) {
                     Log.e("QRScanner", "Failed to dial USSD: ${e.message}", e)
                     showError(getString(R.string.error_ussd_call_failed))
@@ -778,17 +823,10 @@ class QRScannerActivity : ComponentActivity() {
 
             // Hide USSD overlay
 
-            // Stop SMS monitoring
-            try {
-                TransactionDetector.getInstance(this).stopOperation()
-                Log.d("QRScanner", "SMS monitoring stopped")
-            } catch (e: Exception) {
-                Log.e("QRScanner", "Failed to stop SMS monitoring: ${e.message}")
-            }
-
-            // The user explicitly aborted: mark the session row CANCELLED so
-            // it doesn't linger PENDING waiting for a payment nobody made.
-            FlowpayApplication.from(this)?.paymentSessionManager?.onUserCancelled()
+            // Leaving the screen after the dialer opened cannot undo a PIN
+            // submission. Keep the attempt and SMS window for verification.
+            FlowpayApplication.from(this)?.paymentSessionManager
+                ?.onUserCancelled(paymentMayHaveBeenSubmitted = hasDialedUSSD)
 
             // Show termination message briefly
             runOnUiThread {
@@ -1154,21 +1192,18 @@ class QRScannerActivity : ComponentActivity() {
                 smsTimeoutHandler?.removeCallbacks(it)
             }
 
+            val paymentCallWasLaunched = hasDialedUSSD
             // Reset processing flags.
             isProcessingQRCode = false
             hasDialedUSSD = false
 
-            // Leaving this screen with a payment still in flight (system back,
-            // recents swipe) abandons it — end the session so the SMS window
-            // closes with it and the next scan isn't refused as "already in
-            // progress". A no-op once the session reached a terminal state,
-            // and `isFinishing` keeps a config change from cancelling a live
-            // payment. `finishedByWaitingScreenTimeout` excludes the one exit
-            // that is NOT the user abandoning anything: our own waiting-screen
-            // timer giving the screen back on its own timeout while the
-            // payment is still legitimately in flight.
-            if (isFinishing && !finishedByWaitingScreenTimeout) {
-                FlowpayApplication.from(this)?.paymentSessionManager?.onUserCancelled()
+            // A payment can settle after the screen closes. Keep its attempt
+            // visible and eligible for a late bank SMS.
+            if (isFinishing && !finishedByWaitingScreenTimeout &&
+                !intent.getBooleanExtra(EXTRA_PICK_ONLY, false)
+            ) {
+                FlowpayApplication.from(this)?.paymentSessionManager
+                    ?.onUserCancelled(paymentMayHaveBeenSubmitted = paymentCallWasLaunched)
             }
 
             // Wipe the payee VPA from the clipboard now the flow is over.

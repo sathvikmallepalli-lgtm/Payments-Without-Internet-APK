@@ -13,7 +13,10 @@ import com.flowpay.app.states.TimeoutType
 import com.flowpay.app.telephony.CallSessionEvent
 import com.flowpay.app.telephony.CallStateSource
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,13 +41,14 @@ interface PaymentTransactionStore {
         transactionId: String,
         status: String,
         parsed: SimpleTransaction,
-        verifiedAt: Long
+        verifiedAt: Long,
+        expectedStatus: String = TransactionStatus.PENDING
     ): Int
 
-    /** Discards PENDING rows past their deadline. Returns rows removed. */
+    /** Moves stale PENDING rows to UNVERIFIED. Returns rows changed. */
     suspend fun deleteStalePending(now: Long): Int
 
-    /** Discards one row, only while it is still PENDING. Returns rows removed. */
+    /** Legacy guarded delete for an attempt that never reached a call. */
     suspend fun deletePending(transactionId: String): Int
 }
 
@@ -60,11 +64,10 @@ interface PaymentTransactionStore {
  *     normal call end -> WaitingForVerification.
  *  3. A confirming bank SMS ([onSmsConfirmed]) is the only path to SUCCESS.
  *     Call duration is never treated as proof of payment.
- *  4. If no SMS arrives before the deadline the row is discarded. A payment
- *     the bank never confirmed is one this app cannot report on, so it
- *     leaves no record rather than an outcome the user can't act on.
+ *  4. If no SMS arrives, the attempt stays UNVERIFIED so a debit that the bank
+ *     never texted about can still be found and checked in the bank app.
  *
- * Stale PENDING rows from a killed process are discarded lazily via
+ * Stale PENDING rows from a killed process become UNVERIFIED lazily via
  * [reconcileStalePending] (app start, history open, next begin()).
  */
 class PaymentSessionManager(
@@ -100,6 +103,8 @@ class PaymentSessionManager(
     @Volatile private var watchdogJob: Job? = null
 
     @Volatile private var pendingInsertJob: Job? = null
+
+    @Volatile private var verificationUpdateJob: Job? = null
     private var coordinatorAcquired = false
 
     /**
@@ -111,17 +116,13 @@ class PaymentSessionManager(
      * verification deadline, and every attempt to pay in the meantime was
      * blocked — including a retry of the very payment that had failed.
      *
-     * Superseding is safe because a session is not what decides an outcome —
-     * the bank's SMS is. The superseded PENDING row is discarded (nothing ever
-     * confirmed it, so under the "no confirmation, no record" rule it must
-     * leave no trace), and the caller re-arms the SMS window for the new
-     * amount, so a confirmation matching what the user just entered still
-     * lands on the new session exactly as before.
+     * Superseding leaves the previous attempt UNVERIFIED for bank checking.
      *
      * [upiId] and [source] let the QR flow record what it actually knows (a
      * payee VPA, provenance QR) — the QR flow used to bypass the session
      * entirely, so an unconfirmed QR payment left no trace at all.
      */
+    @Suppress("LongMethod") // The initial state, durable row and deadline form one atomic lifecycle boundary.
     fun begin(
         phoneNumber: String,
         amount: String,
@@ -151,18 +152,20 @@ class PaymentSessionManager(
         val now = clock()
         val deadlineAt = now + verificationDeadlineMs
 
-        // Drop the superseded row. deletePending is guarded to PENDING, so a
-        // confirmation that landed on it a moment earlier is never erased.
+        // Keep the superseded attempt visible. The status guard protects a
+        // confirmation that landed just before the new payment began.
         if (supersededTxnId != null) {
             val previousInsert = pendingInsertJob
+            val previousUpdate = verificationUpdateJob
             scope.launch {
                 previousInsert?.join()
-                store.deletePending(supersededTxnId)
+                previousUpdate?.join()
+                store.transitionStatus(supersededTxnId, TransactionStatus.PENDING, TransactionStatus.UNVERIFIED)
             }
         }
 
         pendingInsertJob = scope.launch {
-            // Older stale sessions are discarded before a new one starts.
+            // Older attempts remain available for a bank statement check.
             runCatching { store.deleteStalePending(now) }
             store.insertPending(
                 Transaction(
@@ -195,6 +198,21 @@ class PaymentSessionManager(
         return txnId
     }
 
+    /** Gate the dialer on a durable attempt row, without blocking the UI thread. */
+    @Suppress("ReturnCount") // A missing, superseded or failed insert must never dial.
+    suspend fun awaitPendingInsert(transactionId: String): Boolean {
+        val insert = synchronized(sessionLock) {
+            val state = _paymentState.value
+            if (!state.isInProgress() || state.getTransactionIdValue() != transactionId) return false
+            pendingInsertJob
+        } ?: return false
+        insert.join()
+        return !insert.isCancelled && synchronized(sessionLock) {
+            val state = _paymentState.value
+            state.isInProgress() && state.getTransactionIdValue() == transactionId
+        }
+    }
+
     /** The dial intent could not be launched; the session never really started. */
     fun onDialFailed(reason: String) {
         finishSession(TransactionStatus.CANCELLED) { phone, amount, txnId ->
@@ -202,24 +220,49 @@ class PaymentSessionManager(
         }
     }
 
-    /** The user aborted from the in-call overlay. */
-    fun onUserCancelled() {
-        finishSession(TransactionStatus.CANCELLED) { phone, amount, txnId ->
-            PaymentState.Cancelled(phone, amount, txnId, "Cancelled by user")
+    /** Stop the call/UI; an already-started payment remains uncertain. */
+    @Suppress("ReturnCount") // The no-op and pre-dial cancel guards exit before any bank-verification state.
+    fun onUserCancelled(paymentMayHaveBeenSubmitted: Boolean = false) {
+        val txnId: String
+        val updateJob: Job
+        synchronized(sessionLock) {
+            val state = _paymentState.value
+            if (!state.isInProgress() || state is PaymentState.VerificationPending) return
+            if (state is PaymentState.Initiating && !paymentMayHaveBeenSubmitted) {
+                finishSession(TransactionStatus.CANCELLED) { phone, amount, id ->
+                    PaymentState.Cancelled(phone, amount, id, "Cancelled before call")
+                }
+                return
+            }
+            txnId = state.getTransactionIdValue() ?: return
+            val previousInsert = pendingInsertJob
+            _paymentState.value = PaymentState.VerificationPending(
+                state.getPhoneNumberValue() ?: "", state.getAmountValue() ?: "", txnId
+            )
+            collectJob?.cancel()
+            collectJob = null
+            if (coordinatorAcquired) {
+                coordinator.release(COORDINATOR_TAG)
+                coordinatorAcquired = false
+            }
+            updateJob = scope.launch(start = CoroutineStart.LAZY) {
+                previousInsert?.join()
+                store.transitionStatus(txnId, TransactionStatus.PENDING, TransactionStatus.UNVERIFIED)
+            }
+            verificationUpdateJob = updateJob
         }
+        updateJob.start()
     }
 
     /**
-     * The dial intent launched but no call ever went OFFHOOK (watchdog from
-     * the overlay service). Only acts while the session is still Initiating.
+     * The dial intent launched but Android never reported OFFHOOK. The bank
+     * flow may still have completed, so keep the attempt for verification.
      */
     fun onCallNeverStarted() {
         synchronized(sessionLock) {
             if (_paymentState.value !is PaymentState.Initiating) return
         }
-        finishSession(TransactionStatus.CANCELLED) { phone, amount, txnId ->
-            PaymentState.Cancelled(phone, amount, txnId, "The payment call was never connected")
-        }
+        onUserCancelled(paymentMayHaveBeenSubmitted = true)
     }
 
     /**
@@ -229,7 +272,12 @@ class PaymentSessionManager(
      * active (e.g. the QR flow), letting callers fall back to their own
      * persistence.
      */
-    fun onSmsConfirmed(parsed: SimpleTransaction): String? {
+    data class SmsClaim(val transactionId: String, val status: String, val persisted: Deferred<Int>)
+
+    fun onSmsConfirmed(parsed: SimpleTransaction): String? = onSmsEvidence(parsed)?.transactionId
+
+    @Suppress("LongMethod", "CyclomaticComplexMethod", "ReturnCount")
+    fun onSmsEvidence(parsed: SimpleTransaction): SmsClaim? {
         // Direction check: a manual session is always an outgoing DEBIT
         // (begin() inserts transactionType = "DEBIT"), so an incoming CREDIT
         // SMS can never confirm it. Returning null lets the caller fall back
@@ -239,7 +287,7 @@ class PaymentSessionManager(
             return null
         }
 
-        val newStatus = when {
+        val parsedStatus = when {
             parsed.status.equals(TransactionStatus.FAILED, ignoreCase = true) ->
                 TransactionStatus.FAILED
             parsed.status.equals(TransactionStatus.NEEDS_REVIEW, ignoreCase = true) ->
@@ -255,10 +303,22 @@ class PaymentSessionManager(
         // outcome, last-writer-wins. Claiming inside a single lock guarantees
         // exactly one caller ever owns the confirmation.
         val txnId: String
+        val expectedStatus: String
+        val previousInsert: Job?
+        val previousUpdate: Job?
+        val newStatus: String
         synchronized(sessionLock) {
             val current = _paymentState.value
             if (!current.isInProgress()) return null
             txnId = current.getTransactionIdValue() ?: return null
+            expectedStatus = if (current is PaymentState.VerificationPending) {
+                TransactionStatus.UNVERIFIED
+            } else {
+                TransactionStatus.PENDING
+            }
+            newStatus = PaymentVerificationPolicy.statusForEvidence(expectedStatus, parsedStatus)
+            previousInsert = pendingInsertJob
+            previousUpdate = verificationUpdateJob
             val phone = current.getPhoneNumberValue() ?: parsed.phoneNumber ?: ""
             val amount = current.getAmountValue() ?: parsed.amount
 
@@ -286,17 +346,20 @@ class PaymentSessionManager(
             cleanupLocked()
         }
 
-        scope.launch {
-            pendingInsertJob?.join()
+        val persisted = scope.async {
+            previousInsert?.join()
+            previousUpdate?.join()
             val updated = store.confirmTransaction(
                 transactionId = txnId,
                 status = newStatus,
                 parsed = parsed,
-                verifiedAt = verifiedAt
+                verifiedAt = verifiedAt,
+                expectedStatus = expectedStatus
             )
             Log.d(TAG, "Session row confirmed as $newStatus (rows=$updated)")
+            updated
         }
-        return txnId
+        return SmsClaim(txnId, newStatus, persisted)
     }
 
     /** UI acknowledges a terminal result and returns the session to Idle. */
@@ -309,12 +372,12 @@ class PaymentSessionManager(
         }
     }
 
-    /** Discards PENDING rows whose deadline passed while we weren't running. */
+    /** Keep expired attempts visible for bank verification after process death. */
     fun reconcileStalePending() {
         scope.launch {
-            val discarded = runCatching { store.deleteStalePending(clock()) }.getOrDefault(0)
-            if (discarded > 0) {
-                Log.d(TAG, "Discarded $discarded unconfirmed stale PENDING transaction(s)")
+            val changed = runCatching { store.deleteStalePending(clock()) }.getOrDefault(0)
+            if (changed > 0) {
+                Log.d(TAG, "Marked $changed stale attempt(s) UNVERIFIED")
             }
         }
     }
@@ -339,14 +402,7 @@ class PaymentSessionManager(
                 val state = synchronized(sessionLock) { _paymentState.value }
                 when {
                     state is PaymentState.InProgress && event.durationMs < minRealCallDurationMs -> {
-                        finishSession(TransactionStatus.CANCELLED) { phone, amount, txnId ->
-                            PaymentState.Cancelled(
-                                phone,
-                                amount,
-                                txnId,
-                                "Call ended before the payment flow could complete"
-                            )
-                        }
+                        onUserCancelled()
                     }
                     state is PaymentState.InProgress -> {
                         synchronized(sessionLock) {
@@ -369,11 +425,8 @@ class PaymentSessionManager(
     }
 
     /**
-     * The deadline passed with no confirming bank SMS, so the row is
-     * discarded and nothing is shown: no confirmation means no payment to
-     * report. A genuine confirmation arriving in the SMS window's remaining
-     * grace still surfaces — with the row gone there is nothing to adopt, so
-     * the ingestion pipeline records it as a standalone transaction.
+     * Keep the attempt visible when no bank SMS arrives. A missing SMS does
+     * not prove that the payment failed, as some banks do not send one.
      */
     private fun onVerificationDeadline() {
         // Claim FIRST, write second. Queueing the delete before the claim let a
@@ -381,25 +434,38 @@ class PaymentSessionManager(
         // already-queued deletePending still ran, removing the very row that
         // confirmation had just landed on — success on screen, nothing in
         // history. Claiming inside the lock means only the winner writes.
-        val txnId = synchronized(sessionLock) {
+        val txnId: String
+        val priorStatus: String
+        val previousInsert: Job?
+        val previousUpdate: Job?
+        synchronized(sessionLock) {
             val s = _paymentState.value
             if (!s.isInProgress()) return
-            val id = s.getTransactionIdValue() ?: return
+            txnId = s.getTransactionIdValue() ?: return
+            priorStatus = if (s is PaymentState.VerificationPending) {
+                TransactionStatus.UNVERIFIED
+            } else {
+                TransactionStatus.PENDING
+            }
+            previousInsert = pendingInsertJob
+            previousUpdate = verificationUpdateJob
             _paymentState.value = PaymentState.Timeout(
                 timeoutType = TimeoutType.BANK_VERIFICATION,
                 phoneNumber = s.getPhoneNumberValue() ?: "",
                 amount = s.getAmountValue() ?: "",
-                transactionId = id
+                transactionId = txnId
             )
             cleanupLocked()
-            id
         }
 
         scope.launch {
-            pendingInsertJob?.join()
-            store.deletePending(txnId)
+            previousInsert?.join()
+            previousUpdate?.join()
+            if (priorStatus == TransactionStatus.PENDING) {
+                store.transitionStatus(txnId, TransactionStatus.PENDING, TransactionStatus.UNVERIFIED)
+            }
         }
-        Log.w(TAG, "No bank SMS before deadline - unconfirmed session discarded")
+        Log.w(TAG, "No bank SMS before deadline - attempt needs bank verification")
     }
 
     private fun finishSession(

@@ -80,6 +80,14 @@ val FlowpayStatusWarning = Color(0xFFFF9800)
  *  deliberately neither success-green nor failure-red. */
 val FlowpayStatusNeutral = Color(0xFF9E9E9E)
 
+// TrioMav Pay's quiet consumer shell. The existing FlowPay payment screens
+// keep their established status palette while the new home stays focused.
+val TrioMavBackground = Color(0xFF101114)
+val TrioMavSurface = Color(0xFF1B1E20)
+val TrioMavText = Color(0xFFF6F5F0)
+val TrioMavMuted = Color(0xFFB1B8B4)
+val TrioMavAccent = Color(0xFF57C99A)
+
 /**
  * The single mapping from a [com.flowpay.app.data.TransactionStatus] string
  * to its display color. Replaces the byte-identical getStatusColor()

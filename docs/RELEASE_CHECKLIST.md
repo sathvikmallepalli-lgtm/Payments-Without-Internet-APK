@@ -84,24 +84,19 @@ a lie the next maintainer inherits.
 
 ## Outcome surfaces
 
-- [ ] **An unconfirmed payment surfaces nothing.** Start a payment, let the
-      call end normally, and never send the confirmation SMS (with the debug
-      tool: run `START_OPERATION` and simply don't inject). At the verification
-      deadline there must be **no** result screen and **no** notification, and
-      the row must be gone from Transaction History — no `PENDING` row left
-      behind, and certainly no green "Payment Successful".
+- [ ] **An unconfirmed attempt stays visible.** Start a payment, enter the
+      PIN, close the screen, and send no SMS. History > Check payments must
+      show an `UNVERIFIED` row immediately and after the verification deadline.
+      It must never show green "Payment Successful" from call duration alone.
 
-      This is the visible half of the *no confirmation, no record* rule: a
-      payment the bank never confirmed is one the app cannot report on, so it
-      leaves no trace rather than an outcome the user can't act on. The app
-      used to show an `UNVERIFIED` "No Confirmation Received" screen here; if
-      you see one, this rule has regressed. (Rows written by older builds still
-      render as `UNVERIFIED` in history by design — that is not a regression.)
+- [ ] **Cancel after PIN still needs a bank check.** On a real Airtel/Canara
+      pairing, compare the row with the bank app or statement before retrying.
+      The absence of a bank SMS must not remove the attempt.
 
-- [ ] **A late-but-genuine confirmation still lands.** The SMS operation window
-      deliberately outlives the verification deadline by 30 seconds. Inject a
-      matching confirmation just after the deadline: it must be recorded as a
-      standalone transaction rather than dropped.
+- [ ] **A late-but-genuine debit is visible for review.** The SMS operation
+      window outlives the deadline by 30 seconds. Inject a matching debit just
+      after the deadline: it should attach to the attempt as `NEEDS_REVIEW`,
+      not create a duplicate or silently promote it to success.
 
 ## Hardware-only behavior
 

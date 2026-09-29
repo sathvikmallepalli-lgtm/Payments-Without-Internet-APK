@@ -8,7 +8,9 @@ import android.content.Intent
 import android.util.Log
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.flowpay.app.FlowpayApplication
+import com.flowpay.app.data.TransactionStatus
 import com.flowpay.app.helpers.TransactionDetector
+import com.flowpay.app.payment.PaymentVerificationPolicy
 import com.flowpay.app.payment.sms.SimpleTransaction
 import com.flowpay.app.repository.TransactionRepository
 import com.flowpay.app.ui.activities.PaymentResultActivity
@@ -27,6 +29,7 @@ object SmsIngestionPipeline {
 
     private const val TAG = "SmsIngestionPipeline"
 
+    @Suppress("ReturnCount") // Non-transaction, credit and rejected orphan SMS must exit before UI effects.
     suspend fun ingest(context: Context, detector: TransactionDetector, sender: String, body: String) {
         // Captured BEFORE processSMS: a consuming match clears the operation
         // window (including this id).
@@ -39,20 +42,35 @@ object SmsIngestionPipeline {
         }
 
         // An active payment session owns its row — update it in place. With
-        // no live session (QR flow, or the process died mid-payment), try to
-        // reattach the confirmation to the still-PENDING row recorded at
+        // no live session (e.g. the process died mid-payment), try to
+        // reattach the evidence to the PENDING or UNVERIFIED row recorded at
         // begin(); only insert a fresh row when neither applies. Without the
         // reattach, a payment whose process died would end up as TWO rows:
         // a fresh SUCCESS plus the original row. A confirmation arriving
-        // after the deadline discarded that row finds nothing to adopt and
-        // is saved standalone — the payment still surfaces.
+        // after the deadline is attached as NEEDS_REVIEW, so the user can
+        // compare it with the bank app without a duplicate row.
         val sessionManager = FlowpayApplication.from(context)?.paymentSessionManager
-        val sessionTxnId = sessionManager?.onSmsConfirmed(transaction)
+        val sessionClaim = sessionManager?.onSmsEvidence(transaction)
+        var adoptedStatus: String? = null
+        var alreadyOwnedOrRejected = false
         val recordTxnId = resolveOwnerTxnId(
-            sessionTxnId = sessionTxnId,
+            sessionTxnId = sessionClaim?.transactionId,
             windowTxnId = windowTxnId,
             parsed = transaction
-        ) { orphanId -> adoptOrphanedRow(context, orphanId, transaction) }
+        ) { orphanId ->
+            val result = adoptOrphanedRow(context, orphanId, transaction)
+            if (result.updated > 0) adoptedStatus = result.status
+            alreadyOwnedOrRejected = result.suppressStandalone
+            result.updated
+        }
+        // The session writes off-thread. Wait before showing a result so the
+        // history row cannot still read UNVERIFIED when the screen opens.
+        sessionClaim?.persisted?.await()
+        val outcomeStatus = sessionClaim?.status ?: adoptedStatus ?: transaction.status
+
+        // A window referring to an existing settled or cancelled attempt
+        // must not turn another same-amount alert into a standalone SUCCESS.
+        if (alreadyOwnedOrRejected) return
 
         // A stray incoming CREDIT that no payment claimed is an unrelated bank
         // alert (salary, refund, someone paying you) that merely arrived inside
@@ -82,7 +100,7 @@ object SmsIngestionPipeline {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra("transaction_id", recordTxnId ?: transaction.transactionId)
                 putExtra("amount", transaction.amount)
-                putExtra("status", transaction.status)
+                putExtra("status", outcomeStatus)
                 putExtra("bank_name", transaction.bankName)
                 putExtra("message", transaction.smsExcerpt)
                 putExtra("timestamp", transaction.timestamp)
@@ -147,16 +165,50 @@ object SmsIngestionPipeline {
         recordTxnId == null && parsed.transactionType == "CREDIT"
 
     /** Fills bank-confirmed details into the orphaned session row. */
+    private data class AdoptionResult(
+        val updated: Int,
+        val status: String,
+        val suppressStandalone: Boolean
+    )
+
+    @Suppress("ReturnCount") // Missing and settled rows must be handled before the guarded update.
     private suspend fun adoptOrphanedRow(
         context: Context,
         txnId: String,
         parsed: SimpleTransaction
-    ): Int {
-        return TransactionRepository.getInstance(context).confirmTransaction(
+    ): AdoptionResult {
+        val repository = TransactionRepository.getInstance(context)
+        val row = repository.getTransactionById(txnId)
+            ?: return AdoptionResult(0, parsed.status, suppressStandalone = false)
+        val expectedStatus = row.status
+        if (expectedStatus != TransactionStatus.PENDING && expectedStatus != TransactionStatus.UNVERIFIED) {
+            return AdoptionResult(0, parsed.status, suppressStandalone = true)
+        }
+        val safeStatus = PaymentVerificationPolicy.statusForEvidence(expectedStatus, parsed.status)
+        val updated = repository.confirmTransaction(
             transactionId = txnId,
-            status = parsed.status,
+            status = safeStatus,
             parsed = parsed,
-            verifiedAt = System.currentTimeMillis()
+            verifiedAt = System.currentTimeMillis(),
+            expectedStatus = expectedStatus
         )
+        if (updated > 0) return AdoptionResult(updated, safeStatus, suppressStandalone = false)
+
+        // Startup reconciliation can change PENDING -> UNVERIFIED between
+        // the read and guarded update. Retry against the fresh row as review.
+        val fresh = repository.getTransactionById(txnId)
+        if (expectedStatus == TransactionStatus.PENDING && fresh?.status == TransactionStatus.UNVERIFIED) {
+            val review = repository.confirmTransaction(
+                transactionId = txnId,
+                status = TransactionStatus.NEEDS_REVIEW,
+                parsed = parsed,
+                verifiedAt = System.currentTimeMillis(),
+                expectedStatus = TransactionStatus.UNVERIFIED
+            )
+            if (review > 0) {
+                return AdoptionResult(review, TransactionStatus.NEEDS_REVIEW, suppressStandalone = false)
+            }
+        }
+        return AdoptionResult(0, parsed.status, suppressStandalone = fresh != null)
     }
 }

@@ -19,4 +19,5 @@
     <exclude domain="sharedpref" path="payment_operation.xml" />
     <exclude domain="sharedpref" path="flowpay_db_key.xml" />
     <exclude domain="sharedpref" path="FlowpayPrefs.xml" />
+    <exclude domain="sharedpref" path="triomav_pay.xml" />
 </full-backup-content>

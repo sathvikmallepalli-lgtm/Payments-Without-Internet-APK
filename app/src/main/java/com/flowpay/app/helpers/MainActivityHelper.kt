@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import android.util.Log
+import androidx.activity.ComponentActivity
+import androidx.lifecycle.lifecycleScope
 import com.flowpay.app.FlowpayApplication
 import com.flowpay.app.R
 import com.flowpay.app.SetupActivity
@@ -20,6 +22,7 @@ import com.flowpay.app.payment.Upi123CallStringBuilder
 import com.flowpay.app.payment.messageFor
 import com.flowpay.app.services.CallOverlayService
 import com.flowpay.app.states.PaymentState
+import kotlinx.coroutines.launch
 
 /**
  * Helper class containing all business logic for MainActivity
@@ -198,29 +201,30 @@ class MainActivityHelper(
             return
         }
 
-        // PENDING row is written before anything is dialled. begin() always
-        // succeeds — a new payment supersedes any session still in flight
-        // rather than being refused.
+        // Begin records the attempt asynchronously; await its durable row
+        // before launching the bank call.
         val transactionId = sessionManager.begin(phoneNumber, amount)
+        val activity = context as? ComponentActivity ?: return
+        activity.lifecycleScope.launch {
+            if (!sessionManager.awaitPendingInsert(transactionId)) {
+                uiCallback.showToast(context.getString(R.string.error_payment_not_started))
+                return@launch
+            }
+            TransactionDetector.getInstance(context).startOperation(
+                operationType = "UPI_123",
+                expectedAmount = amount,
+                phoneNumber = phoneNumber,
+                sessionTxnId = transactionId
+            )
 
-        // Gate SMS detection to this operation window. The session txnId is
-        // persisted so a confirmation arriving after a process death can be
-        // reattached to this payment's row instead of inserting a duplicate.
-        TransactionDetector.getInstance(context).startOperation(
-            operationType = "UPI_123",
-            expectedAmount = amount,
-            phoneNumber = phoneNumber,
-            sessionTxnId = transactionId
-        )
-
-        val success = callManager?.initiateUPI123Call(phoneNumber, amount) ?: false
-        if (success) {
-            // Overlay service shows once the coordinator reports the call OFFHOOK
-            CallOverlayService.showOverlay(context, phoneNumber, amount)
-        } else {
-            Log.e(TAG, "Failed to initiate UPI123 call")
-            sessionManager.onDialFailed("Could not start the payment call")
-            TransactionDetector.getInstance(context).stopOperation()
+            val success = callManager?.initiateUPI123Call(phoneNumber, amount) ?: false
+            if (success) {
+                CallOverlayService.showOverlay(context, phoneNumber, amount)
+            } else {
+                Log.e(TAG, "Failed to initiate UPI123 call")
+                sessionManager.onDialFailed("Could not start the payment call")
+                TransactionDetector.getInstance(context).stopOperation()
+            }
         }
     }
 
